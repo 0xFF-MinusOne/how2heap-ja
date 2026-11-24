@@ -4,9 +4,9 @@
 
 long decrypt(long cipher)
 {
-	puts("The decryption uses the fact that the first 12bit of the plaintext (the fwd pointer) is known,");
-	puts("because of the 12bit sliding.");
-	puts("And the key, the ASLR value, is the same with the leading bits of the plaintext (the fwd pointer)");
+	puts("この復号は、平文 (fwd ポインタ) の最初の 12 ビットが既知であるという事実を利用します。");
+	puts("12 ビットのシフトがあるためです。");
+	puts("また、鍵である ASLR の値は、平文 (fwd ポインタ) の上位ビットと同じです。");
 	long key = 0;
 	long plain;
 
@@ -26,41 +26,41 @@ long decrypt(long cipher)
 int main()
 {
 	/*
-	 * This technique demonstrates how to recover the original content from a poisoned
-	 * value because of the safe-linking mechanism.
-	 * The attack uses the fact that the first 12 bit of the plaintext (pointer) is known
-	 * and the key (ASLR slide) is the same to the pointer's leading bits.
-	 * As a result, as long as the chunk where the pointer is stored is at the same page
-	 * of the pointer itself, the value of the pointer can be fully recovered.
-	 * Otherwise, we can also recover the pointer with the page-offset between the storer
-	 * and the pointer. What we demonstrate here is a special case whose page-offset is 0. 
-	 * For demonstrations of other more general cases, plz refer to 
+	 * この技法は、safe-linking の仕組みによって加工 (poison) された値から、
+	 * 元の内容を復元する方法を示します。
+	 * この攻撃は、平文 (ポインタ) の最初の 12 ビットが既知であり、
+	 * 鍵 (ASLR のスライド) がポインタの上位ビットと同じであるという事実を利用します。
+	 * その結果、ポインタが格納されているチャンクがポインタ自身と同じページにある限り、
+	 * ポインタの値を完全に復元できます。
+	 * そうでない場合でも、格納側とポインタとのページオフセットを使ってポインタを復元できます。
+	 * ここで示すのは、ページオフセットが 0 である特別な場合です。
+	 * その他のより一般的な場合のデモについては、次を参照してください: 
 	 * https://github.com/n132/Dec-Safe-Linking
 	 */
 
 	setbuf(stdin, NULL);
 	setbuf(stdout, NULL);
 
-	// step 1: allocate chunks
+	// ステップ 1: チャンクを確保します
 	long *a = malloc(0x20);
 	long *b = malloc(0x20);
-	printf("First, we create chunk a @ %p and chunk b @ %p\n", a, b);
+	printf("まず、チャンク a (%p) とチャンク b (%p) を作成します\n", a, b);
 	malloc(0x10);
-	puts("And then create a padding chunk to prevent consolidation.");
+	puts("次に、併合 (consolidation) を防ぐためのパディング用チャンクを作成します。");
 
 
-	// step 2: free chunks
-	puts("Now free chunk a and then free chunk b.");
+	// ステップ 2: チャンクを解放します
+	puts("ここで、チャンク a を解放し、続けてチャンク b を解放します。");
 	free(a);
 	free(b);
-	printf("Now the freelist is: [%p -> %p]\n", b, a);
-	printf("Due to safe-linking, the value actually stored at b[0] is: %#lx\n", b[0]);
+	printf("これでfree list (freelist) は [%p -> %p] になりました\n", b, a);
+	printf("safe-linking のため、b[0] に実際に格納されている値は次のとおりです: %#lx\n", b[0]);
 
-	// step 3: recover the values
-	puts("Now decrypt the poisoned value");
+	// ステップ 3: 値を復元します
+	puts("加工された値を復号します");
 	long plaintext = decrypt(b[0]);
 
-	printf("value: %p\n", a);
-	printf("recovered value: %#lx\n", plaintext);
+	printf("値: %p\n", a);
+	printf("復元した値: %#lx\n", plaintext);
 	assert(plaintext == (long)a);
 }

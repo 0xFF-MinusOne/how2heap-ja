@@ -6,57 +6,57 @@ int main()
 {
 	setbuf(stdout, NULL);
 
-	printf("This file demonstrates a simple double-free attack with fastbins.\n");
+	printf("このファイルは、fastbin に対する単純なdouble free (double-free) 攻撃を示します。\n");
 
-	printf("Allocate buffers to fill up tcache and prep fastbin.\n");
+	printf("tcache を埋めて fastbin を準備するためにバッファを確保します。\n");
 	void *ptrs[7];
 
 	for (int i=0; i<7; i++) {
 		ptrs[i] = malloc(8);
 	}
 
-	printf("Allocating 3 buffers.\n");
+	printf("バッファを 3 つ確保します。\n");
 	int *a = calloc(1, 8);
 	int *b = calloc(1, 8);
 	int *c = calloc(1, 8);
-	printf("1st malloc(8): %p\n", a);
-	printf("2nd malloc(8): %p\n", b);
-	printf("3rd malloc(8): %p\n", c);
+	printf("1 回目の malloc(8): %p\n", a);
+	printf("2 回目の malloc(8): %p\n", b);
+	printf("3 回目の malloc(8): %p\n", c);
 
-	printf("Fill up tcache.\n");
+	printf("tcache を埋めます。\n");
 	for (int i=0; i<7; i++) {
 		free(ptrs[i]);
 	}
 
-	printf("Freeing the first chunk %p...\n", a);
+	printf("最初のチャンク %p を解放します...\n", a);
 	free(a);
 
-	printf("If we free %p again, things will crash because %p is at the top of the free list.\n", a, a);
+	printf("%p をもう一度解放すると、%p がfree list の先頭にあるためクラッシュします。\n", a, a);
 	// free(a);
 
-	printf("So, instead, we'll free %p.\n", b);
+	printf("そこで、代わりに %p を解放します。\n", b);
 	free(b);
 
-	printf("Now, we can free %p again, since it's not the head of the free list.\n", a);
+	printf("これで、%p はfree listの先頭ではないので、もう一度解放できます。\n", a);
 	/* VULNERABILITY */
 	free(a);
 	/* VULNERABILITY */
 
-	printf("In order to use the free list for allocation, we'll need to empty the tcache.\n");
-	printf("This is because since glibc-2.41, we can only reach fastbin by exhausting tcache first.");
-	printf("Because of this patch: https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=226e3b0a413673c0d6691a0ae6dd001fe05d21cd");
+	printf("free listを使って確保するには、tcache を空にする必要があります。\n");
+	printf("これは、glibc-2.41 以降では tcache を使い切らないと fastbin に到達できないためです。");
+	printf("このパッチによる変更です: https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=226e3b0a413673c0d6691a0ae6dd001fe05d21cd");
 	for (int i = 0; i < 7; i++) {
 		ptrs[i] = malloc(8);
 	}
 
-	printf("Now the free list has [ %p, %p, %p ]. If we malloc 3 times, we'll get %p twice!\n", a, b, a, a);
-	puts("Note that since glibc 2.41, malloc and calloc behave the same in terms of the usage of tcache and fastbin, so it doesn't matter whether we use malloc or calloc here.");
+	printf("これでfree listは [ %p, %p, %p ] になりました。3 回 malloc すると、%p が 2 回返ってきます。\n", a, b, a, a);
+	puts("なお、glibc 2.41 以降では malloc と calloc は tcache と fastbin の使い方が同じなので、ここで malloc と calloc のどちらを使っても問題ありません。");
 	a = malloc(8);
 	b = calloc(1, 8);
 	c = calloc(1, 8);
-	printf("1st malloc(8): %p\n", a);
-	printf("2nd calloc(1, 8): %p\n", b);
-	printf("3rd calloc(1, 8): %p\n", c);
+	printf("1 回目の malloc(8): %p\n", a);
+	printf("2 回目の calloc(1, 8): %p\n", b);
+	printf("3 回目の calloc(1, 8): %p\n", c);
 
 	assert(a == c);
 }

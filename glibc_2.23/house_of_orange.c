@@ -6,110 +6,110 @@
 #include <sys/syscall.h>
 
 /*
-  The House of Orange uses an overflow in the heap to corrupt the _IO_list_all pointer
-  It requires a leak of the heap and the libc
+  House of Orange は、ヒープ上のオーバーフローを使って _IO_list_all ポインタを破壊します。
+  ヒープと libc のリークが必要です。
   Credit: http://4ngelboy.blogspot.com/2016/10/hitcon-ctf-qual-2016-house-of-orange.html
 */
 
 /*
-   This function is just present to emulate the scenario where
-   the address of the function system is known.
+   この関数は、関数 system のアドレスが分かっている状況を
+   再現するためだけに置いています。
 */
 int winner ( char *ptr);
 
 int main()
 {
     /*
-      The House of Orange starts with the assumption that a buffer overflow exists on the heap
-      using which the Top (also called the Wilderness) chunk can be corrupted.
+      House of Orange は、ヒープ上にバッファオーバーフローがあり、
+      それを使ってtop chunk(Top chunk、wilderness(Wilderness)とも呼ばれます)を破壊できる、という前提から始まります。
       
-      At the beginning of execution, the entire heap is part of the Top chunk.
-      The first allocations are usually pieces of the Top chunk that are broken off to service the request.
-      Thus, with every allocation, the Top chunks keeps getting smaller.
-      And in a situation where the size of the Top chunk is smaller than the requested value,
-      there are two possibilities:
-       1) Extend the Top chunk
-       2) Mmap a new page
+      実行開始時点では、ヒープ全体がtop chunkの一部です。
+      最初の割り当ては、通常、リクエストに応えるためにtop chunkから切り出された部分です。
+      したがって、割り当てのたびにtop chunkは小さくなっていきます。
+      そして、top chunkのサイズが要求された値より小さくなる状況では、
+      次の2つの選択肢があります。
+       1) top chunkを拡張する
+       2) 新しいページを mmap する
 
-      If the size requested is smaller than 0x21000, then the former is followed.
+      要求サイズが 0x21000 より小さい場合は、前者が選ばれます。
     */
 
     char *p1, *p2;
     size_t io_list_all, *top;
 
-    fprintf(stderr, "The attack vector of this technique was removed by changing the behavior of malloc_printerr, "
-        "which is no longer calling _IO_flush_all_lockp, in 91e7cf982d0104f0e71770f5ae8e3faf352dea9f (2.26).\n");
+    fprintf(stderr, "この手法の攻撃経路は、malloc_printerr の挙動が変更されて _IO_flush_all_lockp を呼ばなくなったことで塞がれました。"
+        "91e7cf982d0104f0e71770f5ae8e3faf352dea9f (2.26) を参照してください。\n");
   
-    fprintf(stderr, "Since glibc 2.24 _IO_FILE vtable are checked against a whitelist breaking this exploit,"
+    fprintf(stderr, "glibc 2.24 以降、_IO_FILE の vtable がホワイトリストと照合されるようになり、このエクスプロイトは動かなくなりました。"
         "https://sourceware.org/git/?p=glibc.git;a=commit;h=db3476aff19b75c4fdefbe65fcd5f0a90588ba51\n");
 
     /*
-      Firstly, lets allocate a chunk on the heap.
+      まず、ヒープ上にチャンク(chunk)を1つ割り当てましょう。
     */
 
     p1 = malloc(0x400-16);
 
     /*
-       The heap is usually allocated with a top chunk of size 0x21000
-       Since we've allocate a chunk of size 0x400 already,
-       what's left is 0x20c00 with the PREV_INUSE bit set => 0x20c01.
+       ヒープは通常、サイズ 0x21000 のtop chunkとして確保されます。
+       すでにサイズ 0x400 のチャンクを割り当てたので、
+       残りは 0x20c00 で、PREV_INUSE ビットが立つので => 0x20c01 になります。
 
-       The heap boundaries are page aligned. Since the Top chunk is the last chunk on the heap,
-       it must also be page aligned at the end.
+       ヒープの境界はページ境界にアラインされています。top chunkはヒープ上の最後のチャンクなので、
+       その末尾もページ境界にアラインされていなければなりません。
 
-       Also, if a chunk that is adjacent to the Top chunk is to be freed,
-       then it gets merged with the Top chunk. So the PREV_INUSE bit of the Top chunk is always set.
+       また、top chunkに隣接するチャンクが解放(free)されると、
+       そのチャンクはtop chunkと統合(merge)されます。そのため、top chunkの PREV_INUSE ビットは常に立っています。
 
-       So that means that there are two conditions that must always be true.
-        1) Top chunk + size has to be page aligned
-        2) Top chunk's prev_inuse bit has to be set.
+       つまり、常に真でなければならない条件が2つあります。
+        1) top chunkのアドレス + サイズが、ページ境界にアラインされていること
+        2) top chunkの prev_inuse ビットが立っていること
 
-       We can satisfy both of these conditions if we set the size of the Top chunk to be 0xc00 | PREV_INUSE.
-       What's left is 0x20c01
+       top chunkのサイズを 0xc00 | PREV_INUSE にすれば、この2つの条件を両方満たせます。
+       残りは 0x20c01 です。
 
-       Now, let's satisfy the conditions
-       1) Top chunk + size has to be page aligned
-       2) Top chunk's prev_inuse bit has to be set.
+       では、条件を満たしましょう。
+       1) top chunkのアドレス + サイズが、ページ境界にアラインされていること
+       2) top chunkの prev_inuse ビットが立っていること
     */
 
     top = (size_t *) ( (char *) p1 + 0x400 - 16);
     top[1] = 0xc01;
 
     /* 
-       Now we request a chunk of size larger than the size of the Top chunk.
-       Malloc tries to service this request by extending the Top chunk
-       This forces sysmalloc to be invoked.
+       次に、top chunkのサイズより大きいサイズのチャンクを要求します。
+       malloc は、top chunkを拡張してこの要求に応えようとします。
+       これにより sysmalloc が呼び出されます。
 
-       In the usual scenario, the heap looks like the following
+       通常の状況では、ヒープは次のようになっています。
           |------------|------------|------...----|
           |    chunk   |    chunk   | Top  ...    |
           |------------|------------|------...----|
       heap start                              heap end
 
-       And the new area that gets allocated is contiguous to the old heap end.
-       So the new size of the Top chunk is the sum of the old size and the newly allocated size.
+       新しく割り当てられる領域は、古いヒープの終端に連続しています。
+       したがって、top chunkの新しいサイズは、古いサイズと新たに割り当てたサイズの合計になります。
 
-       In order to keep track of this change in size, malloc uses a fencepost chunk,
-       which is basically a temporary chunk.
+       このサイズの変化を記録するために、malloc はフェンスポスト(fencepost)チャンクを使います。
+       これは基本的に一時的なチャンクです。
 
-       After the size of the Top chunk has been updated, this chunk gets freed.
+       top chunkのサイズが更新されると、このチャンクは解放されます。
 
-       In our scenario however, the heap looks like
+       しかし、今回の状況では、ヒープは次のようになります。
           |------------|------------|------..--|--...--|---------|
           |    chunk   |    chunk   | Top  ..  |  ...  | new Top |
           |------------|------------|------..--|--...--|---------|
      heap start                            heap end
 
-       In this situation, the new Top will be starting from an address that is adjacent to the heap end.
-       So the area between the second chunk and the heap end is unused.
-       And the old Top chunk gets freed.
-       Since the size of the Top chunk, when it is freed, is larger than the fastbin sizes,
-       it gets added to list of unsorted bins.
-       Now we request a chunk of size larger than the size of the top chunk.
-       This forces sysmalloc to be invoked.
-       And ultimately invokes _int_free
+       この状況では、新しいtop chunkは、ヒープの終端に隣接するアドレスから始まります。
+       そのため、2番目のチャンクとヒープの終端の間の領域は使われません。
+       そして、古いtop chunkが解放されます。
+       解放されるときのtop chunkのサイズは fastbin のサイズより大きいので、
+       unsorted bin のリストに追加されます。
+       ここで、top chunkのサイズより大きいサイズのチャンクを要求します。
+       これにより sysmalloc が呼び出されます。
+       そして最終的に _int_free が呼び出されます。
 
-       Finally the heap looks like this:
+       最終的に、ヒープは次のようになります。
           |------------|------------|------..--|--...--|---------|
           |    chunk   |    chunk   | free ..  |  ...  | new Top |
           |------------|------------|------..--|--...--|---------|
@@ -121,104 +121,102 @@ int main()
 
     p2 = malloc(0x1000);
     /*
-      Note that the above chunk will be allocated in a different page
-      that gets mmapped. It will be placed after the old heap's end
+      上のチャンクは、mmap された別のページに割り当てられることに注意してください。
+      古いヒープの終端の後ろに置かれます。
 
-      Now we are left with the old Top chunk that is freed and has been added into the list of unsorted bins
+      これで、解放されて unsorted bin のリストに追加された、古いtop chunkが残りました。
 
 
-      Here starts phase two of the attack. We assume that we have an overflow into the old
-      top chunk so we could overwrite the chunk's size.
-      For the second phase we utilize this overflow again to overwrite the fd and bk pointer
-      of this chunk in the unsorted bin list.
-      There are two common ways to exploit the current state:
-        - Get an allocation in an *arbitrary* location by setting the pointers accordingly (requires at least two allocations)
-        - Use the unlinking of the chunk for an *where*-controlled write of the
-          libc's main_arena unsorted-bin-list. (requires at least one allocation)
+      ここから攻撃のフェーズ2が始まります。古いtop chunkへのオーバーフローがあり、
+      チャンクのサイズを上書きできると仮定します。
+      フェーズ2では、このオーバーフローをもう一度使って、unsorted bin のリストにある
+      このチャンクの fd と bk ポインタを上書きします。
+      この状態を悪用する一般的な方法は2つあります。
+        - ポインタを適切に設定して、*任意の*場所に割り当てを得る(少なくとも2回の割り当てが必要です)
+        - チャンクのアンリンク(unlink)を使って、libc の main_arena の unsorted-bin-list を
+          *どこに*書くかを制御した書き込みを行う(少なくとも1回の割り当てが必要です)
 
-      The former attack is pretty straight forward to exploit, so we will only elaborate
-      on a variant of the latter, developed by Angelboy in the blog post linked above.
+      前者の攻撃は悪用がかなり単純なので、ここでは後者の変種、つまり上にリンクしたブログ記事で
+      Angelboy が開発したものだけを詳しく説明します。
 
-      The attack is pretty stunning, as it exploits the abort call itself, which
-      is triggered when the libc detects any bogus state of the heap.
-      Whenever abort is triggered, it will flush all the file pointers by calling
-      _IO_flush_all_lockp. Eventually, walking through the linked list in
-      _IO_list_all and calling _IO_OVERFLOW on them.
+      この攻撃は、libc がヒープの不正な状態を検出したときに呼ばれる abort の呼び出し
+      そのものを悪用するので、非常に見事です。
+      abort が呼ばれると、_IO_flush_all_lockp を呼び出して、すべてのファイルポインタをフラッシュします。
+      その過程で、_IO_list_all の連結リストをたどり、それぞれに対して _IO_OVERFLOW を呼び出します。
 
-      The idea is to overwrite the _IO_list_all pointer with a fake file pointer, whose
-      _IO_OVERLOW points to system and whose first 8 bytes are set to '/bin/sh', so
-      that calling _IO_OVERFLOW(fp, EOF) translates to system('/bin/sh').
-      More about file-pointer exploitation can be found here:
+      狙いは、_IO_list_all ポインタを偽のファイルポインタで上書きすることです。この偽のファイルポインタは、
+      _IO_OVERLOW が system を指し、先頭の8バイトが '/bin/sh' に設定されています。
+      これにより、_IO_OVERFLOW(fp, EOF) の呼び出しが system('/bin/sh') になります。
+      ファイルポインタの悪用については、こちらに詳しい説明があります。
       https://outflux.net/blog/archives/2011/12/22/abusing-the-file-structure/
 
-      The address of the _IO_list_all can be calculated from the fd and bk of the free chunk, as they
-      currently point to the libc's main_arena.
+      _IO_list_all のアドレスは、解放されたチャンクの fd と bk から計算できます。これらは
+      現在 libc の main_arena を指しているためです。
     */
 
     io_list_all = top[2] + 0x9a8;
 
     /*
-      We plan to overwrite the fd and bk pointers of the old top,
-      which has now been added to the unsorted bins.
+      古いtop chunkの fd と bk ポインタを上書きする予定です。
+      このチャンクは、現在 unsorted bin に追加されています。
 
-      When malloc tries to satisfy a request by splitting this free chunk
-      the value at chunk->bk->fd gets overwritten with the address of the unsorted-bin-list
-      in libc's main_arena.
+      malloc がこの空きチャンクを分割して要求に応えようとすると、
+      chunk->bk->fd の値が、libc の main_arena にある unsorted-bin-list のアドレスで上書きされます。
 
-      Note that this overwrite occurs before the sanity check and therefore, will occur in any
-      case.
+      この上書きは健全性チェック(sanity check)より前に行われるため、
+      どんな場合でも発生することに注意してください。
 
-      Here, we require that chunk->bk->fd to be the value of _IO_list_all.
-      So, we should set chunk->bk to be _IO_list_all - 16
+      ここでは、chunk->bk->fd が _IO_list_all の値になっている必要があります。
+      そのため、chunk->bk を _IO_list_all - 16 に設定すればよいことになります。
     */
  
     top[3] = io_list_all - 0x10;
 
     /*
-      At the end, the system function will be invoked with the pointer to this file pointer.
-      If we fill the first 8 bytes with /bin/sh, it is equivalent to system(/bin/sh)
+      最終的に、system 関数がこのファイルポインタへのポインタを引数として呼び出されます。
+      先頭の8バイトを /bin/sh で埋めておけば、system(/bin/sh) と同等になります。
     */
 
     memcpy( ( char *) top, "/bin/sh\x00", 8);
 
     /*
-      The function _IO_flush_all_lockp iterates through the file pointer linked-list
-      in _IO_list_all.
-      Since we can only overwrite this address with main_arena's unsorted-bin-list,
-      the idea is to get control over the memory at the corresponding fd-ptr.
-      The address of the next file pointer is located at base_address+0x68.
-      This corresponds to smallbin-4, which holds all the smallbins of
-      sizes between 90 and 98. For further information about the libc's bin organisation
-      see: https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/
+      関数 _IO_flush_all_lockp は、_IO_list_all にあるファイルポインタの連結リストを
+      順にたどります。
+      このアドレスは main_arena の unsorted-bin-list でしか上書きできないので、
+      対応する fd ポインタの位置にあるメモリを制御することを狙います。
+      次のファイルポインタのアドレスは base_address+0x68 にあります。
+      これは small bin-4 に対応し、small bin-4 はサイズが 90 から 98 の間の
+      すべての small bin を保持します。libc の bin の構成についての詳細は、
+      こちらを参照してください: https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/
 
-      Since we overflow the old top chunk, we also control it's size field.
-      Here it gets a little bit tricky, currently the old top chunk is in the
-      unsortedbin list. For each allocation, malloc tries to serve the chunks
-      in this list first, therefore, iterates over the list.
-      Furthermore, it will sort all non-fitting chunks into the corresponding bins.
-      If we set the size to 0x61 (97) (prev_inuse bit has to be set)
-      and trigger an non fitting smaller allocation, malloc will sort the old chunk into the
-      smallbin-4. Since this bin is currently empty the old top chunk will be the new head,
-      therefore, occupying the smallbin[4] location in the main_arena and
-      eventually representing the fake file pointer's fd-ptr.
+      古いtop chunkをオーバーフローさせるので、そのサイズフィールドも制御できます。
+      ここが少し厄介なところです。現在、古いtop chunkは
+      unsorted bin のリストにあります。割り当てのたびに、malloc はまずこのリストにある
+      チャンクで要求に応えようとするため、リストを順にたどります。
+      さらに、合わないチャンクはすべて対応する bin に振り分けます(sort)。
+      サイズを 0x61 (97) に設定し(prev_inuse ビットは立てておく必要があります)、
+      合わない、より小さい割り当てを発生させると、malloc は古いチャンクを
+      small bin-4 に振り分けます。この bin は現在空なので、古いtop chunkが新しい先頭になり、
+      main_arena の small bin[4] の位置を占め、
+      結果として偽のファイルポインタの fd ポインタを表すことになります。
 
-      In addition to sorting, malloc will also perform certain size checks on them,
-      so after sorting the old top chunk and following the bogus fd pointer
-      to _IO_list_all, it will check the corresponding size field, detect
-      that the size is smaller than MINSIZE "size <= 2 * SIZE_SZ"
-      and finally triggering the abort call that gets our chain rolling.
-      Here is the corresponding code in the libc:
+      malloc は振り分けのほかに、それらに対していくつかのサイズチェックも行います。
+      そのため、古いtop chunkを振り分けた後、不正な fd ポインタをたどって
+      _IO_list_all に行くと、対応するサイズフィールドを調べ、
+      サイズが MINSIZE より小さい "size <= 2 * SIZE_SZ" ことを検出して、
+      最終的に abort の呼び出しが引き起こされ、一連の連鎖が動き出します。
+      libc の対応するコードはこちらです。
       https://code.woboq.org/userspace/glibc/malloc/malloc.c.html#3717
     */
 
     top[1] = 0x61;
 
     /*
-      Now comes the part where we satisfy the constraints on the fake file pointer
-      required by the function _IO_flush_all_lockp and tested here:
+      ここからは、関数 _IO_flush_all_lockp が要求する偽のファイルポインタの制約を
+      満たす部分です。制約のテストはこちらで行われています。
       https://code.woboq.org/userspace/glibc/libio/genops.c.html#813
 
-      We want to satisfy the first condition:
+      1つ目の条件を満たしたいと思います。
       fp->_mode <= 0 && fp->_IO_write_ptr > fp->_IO_write_base
     */
 
@@ -226,14 +224,14 @@ int main()
 
 
     /*
-      1. Set mode to 0: fp->_mode <= 0
+      1. mode を 0 に設定する: fp->_mode <= 0
     */
 
     fp->_mode = 0; // top+0xc0
 
 
     /*
-      2. Set write_base to 2 and write_ptr to 3: fp->_IO_write_ptr > fp->_IO_write_base
+      2. write_base を 2、write_ptr を 3 に設定する: fp->_IO_write_ptr > fp->_IO_write_base
     */
 
     fp->_IO_write_base = (char *) 2; // top+0x20
@@ -241,11 +239,11 @@ int main()
 
 
     /*
-      4) Finally set the jump table to controlled memory and place system there.
-      The jump table pointer is right after the FILE struct:
+      4) 最後に、ジャンプテーブル(jump table)を制御可能なメモリに設定し、そこに system を置きます。
+      ジャンプテーブルへのポインタは FILE 構造体のすぐ後ろにあります。
       base_address+sizeof(FILE) = jump_table
 
-         4-a)  _IO_OVERFLOW  calls the ptr at offset 3: jump_table+0x18 == winner
+         4-a)  _IO_OVERFLOW はオフセット 3 のポインタを呼び出します: jump_table+0x18 == winner
     */
 
     size_t *jump_table = &top[12]; // controlled memory
@@ -253,12 +251,12 @@ int main()
     *(size_t *) ((size_t) fp + sizeof(FILE)) = (size_t) jump_table; // top+0xd8
 
 
-    /* Finally, trigger the whole chain by calling malloc */
+    /* 最後に、malloc を呼び出して一連の連鎖全体を発動させます */
     malloc(10);
 
    /*
-     The libc's error message will be printed to the screen
-     But you'll get a shell anyways.
+     libc のエラーメッセージが画面に表示されます。
+     しかし、いずれにせよシェルが得られます。
    */
 
     return 0;

