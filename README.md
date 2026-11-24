@@ -1,5 +1,10 @@
-> これは [shellphish/how2heap](https://github.com/shellphish/how2heap) の日本語訳です。原著のライセンス (MIT) に従います。
-> 訳したのは説明文とコメントのみで、コードは原著のままです。対象は各技法の最新の glibc バージョンのファイルです(古いバージョンのディレクトリは原文のままです)。
+> **これは日本語訳です。**
+>
+> - 原著: [shellphish/how2heap](https://github.com/shellphish/how2heap)(原著者: Shellphish)
+> - ライセンス: MIT — 翻訳も同じライセンスです([ライセンス全文](LICENSE))。原文から翻訳(変更)しています
+> - 訳した範囲: README・ChangeLog・各技法の最新 glibc バージョンのファイル(説明文とコメント。コードは原著のまま)
+> - 訳していないもの: 古い glibc バージョンのディレクトリ(原文のまま)
+> - 他の日本語訳: [一覧](https://github.com/orgs/0xFF-MinusOne/repositories?q=-ja)
 
 # 学習用ヒープエクスプロイト(Heap Exploitation)
 
