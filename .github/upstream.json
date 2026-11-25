@@ -1,0 +1,15 @@
+{
+  "upstreams": [
+    {
+      "repo": "shellphish/how2heap",
+      "branch": "master",
+      "paths": [
+        "glibc_*",
+        "README.md",
+        "GLOSSARY.md",
+        "glibc_ChangeLog.md"
+      ],
+      "base": "0205b88e1da730f582de259f59638b10da4956e7"
+    }
+  ]
+}
