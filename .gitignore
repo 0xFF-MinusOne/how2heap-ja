@@ -14,3 +14,5 @@ glibc_2.*/*
 
 # general
 **.swp
+.site-src/
+site/

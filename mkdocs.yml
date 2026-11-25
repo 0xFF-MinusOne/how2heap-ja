@@ -1,0 +1,61 @@
+site_name: 学習用ヒープエクスプロイト how2heap(日本語訳)
+site_description: shellphish/how2heap の日本語訳
+site_url: https://0xff-minusone.github.io/how2heap-ja/
+repo_url: https://github.com/0xFF-MinusOne/how2heap-ja
+docs_dir: .site-src
+copyright: >-
+  日本語訳。原著:
+  <a href="https://github.com/shellphish/how2heap">shellphish/how2heap</a>
+  / ライセンス: <a href="https://github.com/0xFF-MinusOne/how2heap-ja/blob/main/LICENSE">MIT</a>
+
+theme:
+  name: material
+  language: ja
+  font: false
+  logo: assets/minusone-mark.svg
+  favicon: assets/minusone-avatar-light.svg
+  features:
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+
+extra_css:
+  - assets/ja-docs.css
+  - assets/mkdocs.css
+  - assets/minusone.css
+extra_javascript:
+  - assets/ja-docs.js
+
+plugins:
+  - search:
+      lang: ja
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/shellphish/how2heap
+      name: 原著(shellphish/how2heap)
+
+nav:
+  - はじめに: README.md
+  - 用語集: GLOSSARY.md
+  - glibc の変更履歴: glibc_ChangeLog.md
